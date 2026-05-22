@@ -64,6 +64,7 @@ export const aiPromptDiff = (body) => request('/ai/prompt-diff', { method: 'POST
 export const aiCostAnomaly = (body) => request('/ai/cost-anomaly', { method: 'POST', body: JSON.stringify(body || {}) });
 export const aiEvalGenerator = (body) => request('/ai/eval-generator', { method: 'POST', body: JSON.stringify(body || {}) });
 export const aiJudgeCalibrator = (body) => request('/ai/judge-calibrator', { method: 'POST', body: JSON.stringify(body || {}) });
+export const blastRadiusAnalyze = (body) => request('/blast-radius/analyze', { method: 'POST', body: JSON.stringify(body || {}) });
 
 export const getAIHistory = (feature, limit = 25) => {
   const qs = new URLSearchParams({ ...(feature ? { feature } : {}), limit: String(limit) }).toString();

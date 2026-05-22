@@ -39,5 +39,6 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 
 app.use('/api', require('./routes/obsExtras'));
 app.use('/api/custom-views', require('./routes/customViews'));
+app.use('/api/blast-radius', require('./routes/blastRadiusAnalyzer'));
 
 app.listen(PORT, () => console.log(`\nAgent Observability Plus API on http://localhost:${PORT}\n`));

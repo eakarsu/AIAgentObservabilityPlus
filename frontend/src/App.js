@@ -26,6 +26,10 @@ import CustomViewsPage from './pages/CustomViewsPage';
 import { getToken } from './services/api';
 import './App.css';
 
+import CodexCustomVizFeature from './pages/CodexCustomVizFeature';
+import CodexOperationsFeature from './pages/CodexOperationsFeature';
+import BlastRadiusAnalyzerPage from './pages/BlastRadiusAnalyzerPage';
+
 function RequireAuth({ children }) {
   const location = useLocation();
   if (!getToken()) return <Navigate to="/login" replace state={{ from: location }} />;
@@ -40,6 +44,9 @@ function Shell() {
         <Topbar />
         <div style={{ padding: '24px 32px' }}>
           <Routes>
+        <Route path="/codex/custom-viz" element={<CodexCustomVizFeature />} />
+        <Route path="/codex/operations" element={<CodexOperationsFeature />} />
+
             <Route path="/" element={<Dashboard />} />
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/traces" element={<TracesPage />} />
@@ -60,6 +67,7 @@ function Shell() {
             <Route path="/wb/trace-viewer" element={<TraceViewerWorkbench />} />
             <Route path="/wb/otlp-ingest" element={<OtlpIngestWorkbench />} />
             <Route path="/custom-views" element={<CustomViewsPage />} />
+            <Route path="/blast-radius" element={<BlastRadiusAnalyzerPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
