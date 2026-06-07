@@ -32,6 +32,7 @@ const CUSTOM_LINKS = [
 const OBS_LINKS = [
   { to: '/custom-views', label: 'Custom Observability Views' },
   { to: '/blast-radius', label: 'Trace Blast Radius' },
+  { to: '/production-controls', label: 'Production Controls' },
 ];
 
 export default function Sidebar() {

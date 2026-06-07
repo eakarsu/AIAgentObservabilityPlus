@@ -29,6 +29,7 @@ import './App.css';
 import CodexCustomVizFeature from './pages/CodexCustomVizFeature';
 import CodexOperationsFeature from './pages/CodexOperationsFeature';
 import BlastRadiusAnalyzerPage from './pages/BlastRadiusAnalyzerPage';
+import ProductionControlsPage from './pages/ProductionControlsPage';
 
 function RequireAuth({ children }) {
   const location = useLocation();
@@ -68,6 +69,7 @@ function Shell() {
             <Route path="/wb/otlp-ingest" element={<OtlpIngestWorkbench />} />
             <Route path="/custom-views" element={<CustomViewsPage />} />
             <Route path="/blast-radius" element={<BlastRadiusAnalyzerPage />} />
+            <Route path="/production-controls" element={<ProductionControlsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
