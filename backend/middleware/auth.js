@@ -1,25 +1,3 @@
-const jwt = require('jsonwebtoken');
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
-const JWT_SECRET = process.env.JWT_SECRET || 'agent_obs_plus-secret-2026';
-
-const authenticateToken = (req, res, next) => {
-  const h = req.headers['authorization'];
-  const token = h && h.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Access token required' });
-  try { req.user = jwt.verify(token, JWT_SECRET); next(); }
-  catch (e) { return res.status(403).json({ error: 'Invalid or expired token' }); }
-};
-
-const ROLES = ['viewer', 'analyst', 'commander'];
-function requireRole(...allowed) {
-  return (req, res, next) => {
-    const role = req.user?.role || 'viewer';
-    if (!allowed.includes(role)) return res.status(403).json({ error: 'Forbidden' });
-    next();
-  };
-}
-const requireWriter = requireRole('commander', 'analyst');
-const requireCommander = requireRole('commander');
-
-module.exports = { authenticateToken, JWT_SECRET, ROLES, requireRole, requireWriter, requireCommander };
+const jwt=require('jsonwebtoken');const{getJwtSecret,tenantId}=require('../lib/security');
+function authenticateToken(req,res,next){const match=(req.headers.authorization||'').match(/^Bearer\s+(.+)$/i);if(!match)return res.status(401).json({error:'Bearer access token required'});let secret;try{secret=getJwtSecret();}catch(error){return res.status(503).json({error:'Authentication is not configured'});}try{req.user=jwt.verify(match[1],secret,{algorithms:['HS256']});return next();}catch(error){return res.status(403).json({error:'Invalid or expired token'});}}
+const ROLES=['viewer','analyst','commander'];function requireRole(...allowed){return(req,res,next)=>allowed.includes(req.user?.role||'viewer')?next():res.status(403).json({error:'Forbidden',required_roles:allowed});}function requireTenant(req,res,next){try{req.tenantId=tenantId(req.user);return next();}catch(error){return res.status(403).json({error:error.message});}}const requireWriter=requireRole('commander','analyst');const requireCommander=requireRole('commander');module.exports={authenticateToken,ROLES,requireRole,requireWriter,requireCommander,requireTenant};

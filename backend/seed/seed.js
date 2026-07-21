@@ -2,17 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const pool = require('../config/database');
 
+if (process.env.ENABLE_DEMO_SEED !== 'true') {
+  throw new Error('Demo seed blocked. Run migrations separately and set ENABLE_DEMO_SEED=true explicitly.');
+}
+
 async function main() {
-  const migDir = path.join(__dirname, '..', 'migrations');
-  for (const f of fs.readdirSync(migDir).filter((x) => x.endsWith('.sql')).sort()) {
-    const sql = fs.readFileSync(path.join(migDir, f), 'utf8');
-    try { await pool.query(sql); console.log(`[seed] applied ${f}`); }
-    catch (e) { console.warn(`[seed] ${f} warn: ${e.message}`); }
-  }
-  await pool.query(
-    "INSERT INTO users (email, password, name, role) VALUES ('admin@agent-obs-plus.local','secure123','Admin','commander') ON CONFLICT (email) DO NOTHING"
-  );
-  console.log('[seed] demo user ready');
+  console.log('[seed] inserting opt-in demo domain rows; migrations and users are managed separately');
 
   // projects
   for (const row of [{"name":"support-bot","environment":"prod","status":"active","notes":null},{"name":"classify-pipeline","environment":"staging","status":"active","notes":null},{"name":"rag-search","environment":"prod","status":"active","notes":null}]) {

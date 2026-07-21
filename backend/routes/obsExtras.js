@@ -1,52 +1,5 @@
-// routes/obsExtras.js — span hierarchy + OTLP ingest
-const express=require('express');
-const pool=require('../config/database');
-const router=express.Router();
-
-// Mock span hierarchy for a given trace_id — derives spans deterministically from trace row
-router.get('/traces/:id/spans', async (req,res)=>{
-  try {
-    const t=await pool.query('SELECT * FROM traces WHERE id=$1',[req.params.id]);
-    if(!t.rows.length) return res.status(404).json({error:'not found'});
-    const tr=t.rows[0];
-    const total=Number(tr.duration_ms||1000);
-    const spanNames=['llm.request','tool.search','db.query','llm.compose','tool.respond'];
-    const out=[];
-    let cursor=0;
-    for(let i=0;i<Math.min(Number(tr.span_count||3),spanNames.length);i++){
-      const dur=Math.max(20,Math.floor(total*(0.1+(i%3)*0.18)));
-      out.push({id:tr.id*100+i,trace_id:tr.id,span_name:spanNames[i],parent_span_id:i===0?null:tr.id*100,depth:i===0?0:1,duration_ms:dur,status:i===2&&tr.status==='error'?'error':'ok',started_at:new Date(Date.now()-(total-cursor)).toISOString()});
-      cursor+=dur;
-    }
-    res.json(out);
-  } catch(e){ res.status(500).json({error:e.message}); }
-});
-
-// OTLP ingest endpoint — accepts OTLP-formatted JSON and creates a trace row
-router.post('/v1/traces', async (req,res)=>{
-  try {
-    const b=req.body||{};
-    const rss=Array.isArray(b.resourceSpans)?b.resourceSpans:[];
-    let totalSpans=0;let svc='unknown';let durMs=0;
-    for(const rs of rss){
-      const attrs=(rs.resource&&rs.resource.attributes)||[];
-      for(const a of attrs){
-        if(a.key==='service.name'&&a.value){
-          svc=a.value.stringValue||a.value.string_value||svc;
-        }
-      }
-      for(const ss of (rs.scopeSpans||[])){
-        for(const sp of (ss.spans||[])){
-          totalSpans++;
-          const s=Number(sp.startTimeUnixNano||0);
-          const e=Number(sp.endTimeUnixNano||0);
-          if(e>s) durMs=Math.max(durMs, Math.floor((e-s)/1e6));
-        }
-      }
-    }
-    const r=await pool.query("INSERT INTO traces (project_name,span_count,status,duration_ms,started_at) VALUES ($1,$2,'ok',$3,NOW()) RETURNING *",[svc,totalSpans,durMs]);
-    res.json({ingested:true,trace:r.rows[0],spans_received:totalSpans});
-  } catch(e){ res.status(500).json({error:e.message}); }
-});
-
+const router=require('express').Router();const pool=require('../config/database');const{requireTenant,requireWriter}=require('../middleware/auth');const{parseOtlp}=require('../services/telemetryPolicy');
+router.use(requireTenant);
+router.get('/traces/:id/spans',async(req,res)=>{try{const trace=await pool.query('SELECT id FROM traces WHERE id=$1 AND tenant_id=$2',[req.params.id,req.tenantId]);if(!trace.rowCount)return res.status(404).json({error:'Trace not found'});const result=await pool.query('SELECT id,trace_id,external_span_id,external_parent_span_id,name,kind,attrs,duration_ms,status,started_at,input_tokens,output_tokens,cost_usd FROM spans WHERE trace_id=$1 AND tenant_id=$2 ORDER BY started_at,id',[req.params.id,req.tenantId]);res.json(result.rows);}catch(error){res.status(500).json({error:'Unable to load spans'});}});
+router.post('/v1/traces',requireWriter,async(req,res)=>{const bytes=Buffer.byteLength(JSON.stringify(req.body||{}));const max=Number(process.env.TRACE_PAYLOAD_MAX_BYTES||5242880);if(bytes>max)return res.status(413).json({error:`OTLP payload exceeds ${max} bytes`});const groups=parseOtlp(req.body);if(!groups.length)return res.status(422).json({error:'No valid OTLP spans found'});const client=await pool.connect();try{await client.query('BEGIN');const ingested=[];for(const group of groups){const existing=await client.query('SELECT id FROM traces WHERE tenant_id=$1 AND external_trace_id=$2',[req.tenantId,group.trace_id]);if(existing.rowCount){ingested.push({external_trace_id:group.trace_id,trace_id:existing.rows[0].id,duplicate:true});continue;}const trace=(await client.query(`INSERT INTO traces(tenant_id,external_trace_id,project_name,service_name,span_count,status,duration_ms,started_at,total_cost_usd) VALUES($1,$2,$3,$3,$4,$5,$6,$7,$8) RETURNING *`,[req.tenantId,group.trace_id,group.service_name,group.spans.length,group.status,group.duration_ms,group.spans[0]?.started_at||new Date(),group.total_cost_usd])).rows[0];for(const span of group.spans)await client.query(`INSERT INTO spans(tenant_id,trace_id,external_span_id,external_parent_span_id,name,kind,attrs,duration_ms,status,started_at,input_tokens,output_tokens,cost_usd) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,[req.tenantId,trace.id,span.span_id,span.parent_span_id,span.name,span.kind,span.attrs,span.duration_ms,span.status,span.started_at,span.input_tokens,span.output_tokens,span.cost_usd]);ingested.push({external_trace_id:group.trace_id,trace_id:trace.id,spans_received:group.spans.length,duplicate:false});}await client.query('COMMIT');res.status(202).json({ingested});}catch(error){await client.query('ROLLBACK');console.error('OTLP ingest failed:',error.message);res.status(500).json({error:'OTLP ingestion failed'});}finally{client.release();}});
 module.exports=router;

@@ -1,44 +1,21 @@
 #!/bin/bash
-set -e
-BLUE='\033[0;34m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
-echo -e "${BLUE}== Agent Observability Plus ==${NC}"
-if [ -f .env ]; then export $(grep -v '^#' .env | xargs); fi
-BACKEND_PORT=${BACKEND_PORT:-4055}
-FRONTEND_PORT=${FRONTEND_PORT:-4054}
-DB_NAME=${DB_NAME:-agent_obs_plus}
-DB_USER=${DB_USER:-postgres}
-echo -e "${YELLOW}Cleaning ports...${NC}"
-lsof -ti:$BACKEND_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
-lsof -ti:$FRONTEND_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
-echo -e "${YELLOW}Checking PostgreSQL...${NC}"
-if ! pg_isready -h ${DB_HOST:-localhost} -p ${DB_PORT:-5432} > /dev/null 2>&1; then
-  if [[ "$OSTYPE" == "darwin"* ]]; then
-    brew services start postgresql@14 2>/dev/null || brew services start postgresql 2>/dev/null || true
-    sleep 2
-  fi
-fi
-echo -e "${GREEN}✓ Postgres ok${NC}"
-psql -h ${DB_HOST:-localhost} -U $DB_USER -tc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>/dev/null | grep -q 1 || \
-  createdb -h ${DB_HOST:-localhost} -U $DB_USER $DB_NAME 2>/dev/null || true
-echo -e "${GREEN}✓ DB ready ($DB_NAME)${NC}"
-cd backend && [ -d node_modules ] || npm install --silent 2>&1 | tail -3
-cd ..
-cd frontend && [ -d node_modules ] || npm install --silent 2>&1 | tail -3
-cd ..
-(cd backend && node seed/seed.js) || true
-echo -e "${GREEN}✓ Seeded${NC}"
-echo -e "${BLUE}Backend on $BACKEND_PORT, Frontend on $FRONTEND_PORT${NC}"
-(cd backend && npx --yes nodemon server.js) &
-BACKEND_PID=$!
-sleep 2
-(cd frontend && BROWSER=none PORT=$FRONTEND_PORT npm start) &
-FRONTEND_PID=$!
-cleanup() {
-  kill $BACKEND_PID 2>/dev/null || true
-  kill $FRONTEND_PID 2>/dev/null || true
-  lsof -ti:$BACKEND_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
-  lsof -ti:$FRONTEND_PORT 2>/dev/null | xargs kill -9 2>/dev/null || true
-  exit 0
-}
-trap cleanup SIGINT SIGTERM
-wait
+set -euo pipefail
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export BACKEND_PORT="${BACKEND_PORT:-4055}"
+export FRONTEND_PORT="${FRONTEND_PORT:-4054}"
+fail(){ echo "ERROR: $*" >&2; exit 1; }
+port_free(){ ! lsof -ti ":$1" >/dev/null 2>&1; }
+echo "Agent Observability Plus"
+echo "Read-only startup preflight; migrations, admin provisioning and demo data are separate commands."
+command -v node >/dev/null 2>&1||fail "Node.js is required."
+[ -d "$PROJECT_DIR/backend/node_modules" ]||fail "Backend dependencies are missing; install them explicitly."
+[ -d "$PROJECT_DIR/frontend/node_modules" ]||fail "Frontend dependencies are missing; install them explicitly."
+port_free "$BACKEND_PORT"||fail "Backend port $BACKEND_PORT is already in use."
+port_free "$FRONTEND_PORT"||fail "Frontend port $FRONTEND_PORT is already in use."
+cleanup(){ trap - INT TERM EXIT; [ -n "${BACKEND_PID:-}" ]&&kill "$BACKEND_PID" 2>/dev/null||true; [ -n "${FRONTEND_PID:-}" ]&&kill "$FRONTEND_PID" 2>/dev/null||true; }
+trap cleanup INT TERM EXIT
+(cd "$PROJECT_DIR/backend"&&node server.js)& BACKEND_PID=$!
+(cd "$PROJECT_DIR/frontend"&&BROWSER=none PORT="$FRONTEND_PORT" npm start)& FRONTEND_PID=$!
+echo "Frontend: http://localhost:$FRONTEND_PORT"
+echo "Backend:  http://localhost:$BACKEND_PORT"
+wait "$BACKEND_PID" "$FRONTEND_PID"

@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "start": "bash start.sh"
+    "start": "bash start.sh",
+    "migrate": "cd backend && npm run migrate",
+    "create-admin": "cd backend && npm run create-admin",
+    "seed:demo": "cd backend && npm run seed:demo",
+    "test": "cd backend && npm test"
   }
 }
