@@ -22,7 +22,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'AIAgentO
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api', authenticateToken);
 app.use('/api', (req, res, next) => {
-  const safe = req.path === '/v1/traces' || /^\/traces\/[^/]+\/spans$/.test(req.path) || /^\/evaluations(?:\/|$)/.test(req.path);
+  const safe = req.path === '/v1/traces' || req.path === '/ai/observability-readiness' || /^\/traces\/[^/]+\/spans$/.test(req.path) || /^\/evaluations(?:\/|$)/.test(req.path);
   if (process.env.ENABLE_LEGACY_GLOBAL_ROUTES === 'true' || safe) return next();
   return res.status(503).json({
     error: 'Legacy global routes are disabled because they are not tenant-isolated',

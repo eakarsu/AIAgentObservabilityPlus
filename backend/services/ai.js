@@ -1,26 +1,12 @@
 // LLM helper for Agent Observability Plus
-const fs = require('fs');
-const FALLBACK_ENV = '/Users/erolakarsu/projects/beauty-wellness-ai/.env';
-function readFallback() {
-  try {
-    if (!fs.existsSync(FALLBACK_ENV)) return {};
-    const out = {};
-    for (const line of fs.readFileSync(FALLBACK_ENV, 'utf8').split('\n')) {
-      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-      if (!m) continue;
-      let v = m[2];
-      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-      out[m[1]] = v;
-    }
-    return out;
-  } catch (_) { return {}; }
-}
+const CANONICAL_OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 function creds() {
-  const fb = readFallback();
-  return {
-    key: process.env.OPENROUTER_API_KEY || fb.OPENROUTER_API_KEY || '',
-    model: process.env.OPENROUTER_MODEL || fb.OPENROUTER_MODEL || 'anthropic/claude-haiku-4.5',
-  };
+  const baseUrl = String(process.env.OPENROUTER_BASE_URL || '').replace(/\/$/, '');
+  const key = String(process.env.OPENROUTER_API_KEY || '').trim();
+  const model = String(process.env.OPENROUTER_MODEL || '').trim();
+  if (baseUrl !== CANONICAL_OPENROUTER_BASE_URL) throw new Error('OPENROUTER_BASE_URL must use the canonical OpenRouter endpoint');
+  if (!key || !model) throw new Error('OpenRouter key and model must be configured');
+  return { baseUrl, key, model };
 }
 const SYSTEM_BASE = 'You are a senior analyst supporting the Agent Observability Plus. ' +
   'CRITICAL OUTPUT RULES: (1) Return ONLY raw JSON matching the schema requested. ' +
@@ -28,33 +14,36 @@ const SYSTEM_BASE = 'You are a senior analyst supporting the Agent Observability
   '(4) Keep concise to fit token limit; never truncate. ' +
   '(5) First char must be `{`, last must be `}`.';
 
-function callOpenRouter(systemPrompt, userPrompt) {
-  return new Promise((resolve) => {
-    const { key, model } = creds();
-    if (!key) return resolve({ error: 'OPENROUTER_API_KEY not configured' });
-    const https = require('https');
-    const payload = JSON.stringify({
+async function callOpenRouterEvidence(systemPrompt, userPrompt) {
+  const { baseUrl, key, model } = creds();
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': `http://127.0.0.1:${process.env.FRONTEND_PORT || 30021}`,
+      'X-Title': 'Agent Observability Plus',
+    },
+    body: JSON.stringify({
       model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
       temperature: 0.4, max_tokens: 6000, response_format: { type: 'json_object' },
-    });
-    const req = https.request({
-      hostname: 'openrouter.ai', path: '/api/v1/chat/completions', method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload),
-        Authorization: `Bearer ${key}`,
-        'HTTP-Referer': 'http://localhost:4054', 'X-Title': 'Agent Observability Plus' },
-    }, (res) => {
-      let body = ''; res.on('data', (c) => (body += c));
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(body);
-          if (parsed.error) return resolve({ error: parsed.error.message || 'OpenRouter error' });
-          resolve(parsed.choices?.[0]?.message?.content || '');
-        } catch (e) { resolve({ error: 'parse failed' }); }
-      });
-    });
-    req.on('error', (e) => resolve({ error: e.message }));
-    req.write(payload); req.end();
+    }),
+    signal: AbortSignal.timeout(45_000),
   });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(`OpenRouter request failed with status ${response.status}`);
+  const requestId = typeof payload?.id === 'string' ? payload.id.trim() : '';
+  const providerModel = typeof payload?.model === 'string' ? payload.model.trim() : '';
+  const result = typeof payload?.choices?.[0]?.message?.content === 'string' ? payload.choices[0].message.content.trim() : '';
+  if (!requestId || !providerModel || result.length < 40) throw new Error('OpenRouter response did not include substantive provider evidence');
+  return {
+    result,
+    providerReceipt: { provider: 'openrouter', requestId, model: providerModel, completedAt: new Date().toISOString() },
+  };
+}
+async function callOpenRouter(systemPrompt, userPrompt) {
+  try { return (await callOpenRouterEvidence(systemPrompt, userPrompt)).result; }
+  catch (error) { return { error: error.message }; }
 }
 function stripFences(text) {
   let t = String(text).trim();
@@ -125,4 +114,4 @@ async function runFeature(slug, schema, payload) {
   const r = await callOpenRouter(sys, usr);
   return safeParse(r, { summary: typeof r === 'string' ? r : 'No response' });
 }
-module.exports = { runFeature };
+module.exports = { callOpenRouterEvidence, runFeature };

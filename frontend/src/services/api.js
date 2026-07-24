@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:4055/api';
+const API_BASE = '/api';
 const TOKEN_KEY = 'agent_obs_plus_token';
 const USER_KEY = 'agent_obs_plus_user';
 

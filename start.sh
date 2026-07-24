@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$PROJECT_DIR/.env" ]; then set -a; source "$PROJECT_DIR/.env"; set +a; fi
 export BACKEND_PORT="${BACKEND_PORT:-4055}"
 export FRONTEND_PORT="${FRONTEND_PORT:-4054}"
 fail(){ echo "ERROR: $*" >&2; exit 1; }
@@ -15,7 +16,7 @@ port_free "$FRONTEND_PORT"||fail "Frontend port $FRONTEND_PORT is already in use
 cleanup(){ trap - INT TERM EXIT; [ -n "${BACKEND_PID:-}" ]&&kill "$BACKEND_PID" 2>/dev/null||true; [ -n "${FRONTEND_PID:-}" ]&&kill "$FRONTEND_PID" 2>/dev/null||true; }
 trap cleanup INT TERM EXIT
 (cd "$PROJECT_DIR/backend"&&node server.js)& BACKEND_PID=$!
-(cd "$PROJECT_DIR/frontend"&&BROWSER=none PORT="$FRONTEND_PORT" npm start)& FRONTEND_PID=$!
+(cd "$PROJECT_DIR/frontend"&&PORT="$FRONTEND_PORT" BROWSER=none npm start)& FRONTEND_PID=$!
 echo "Frontend: http://localhost:$FRONTEND_PORT"
 echo "Backend:  http://localhost:$BACKEND_PORT"
 wait "$BACKEND_PID" "$FRONTEND_PID"

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 const TOKEN_KEY = Object.keys(localStorage).find((k) => k.endsWith('_token')) || 'agent_obs_plus_token';
-const API_BASE = 'http://localhost:4055/api';
+const API_BASE = '/api';
 const SAMPLE = JSON.stringify({resourceSpans:[{resource:{attributes:[{key:'service.name',value:{stringValue:'support-bot'}}]},scopeSpans:[{spans:[{traceId:'abc...',spanId:'001',name:'llm.call',startTimeUnixNano:'1700000000000000000',endTimeUnixNano:'1700000001500000000'},{traceId:'abc...',spanId:'002',name:'tool.search',parentSpanId:'001',startTimeUnixNano:'1700000000200000000',endTimeUnixNano:'1700000000900000000'}]}]}]}, null, 2);
 export default function OtlpIngestWorkbench(){
   const [body,setBody]=useState(SAMPLE);const [resp,setResp]=useState(null);const [busy,setBusy]=useState(false);const [count,setCount]=useState(0);

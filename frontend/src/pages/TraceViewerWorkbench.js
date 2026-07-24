@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 const TOKEN_KEY = Object.keys(localStorage).find((k) => k.endsWith('_token')) || 'agent_obs_plus_token';
-const API_BASE = 'http://localhost:4055/api';
+const API_BASE = '/api';
 export default function TraceViewerWorkbench(){
   const [rows,setRows]=useState([]);const [open,setOpen]=useState(null);const [spans,setSpans]=useState([]);const [loading,setLoading]=useState(false);
   useEffect(()=>{fetch(API_BASE+'/traces',{headers:{Authorization:'Bearer '+localStorage.getItem(TOKEN_KEY)}}).then(r=>r.json()).then(setRows);},[]);

@@ -3,6 +3,37 @@ const router = express.Router();
 const pool = require('../config/database');
 const ai = require('../services/ai');
 
+router.post('/observability-readiness', async (req, res) => {
+  const workflowSummary = typeof req.body?.workflowSummary === 'string' ? req.body.workflowSummary.trim() : '';
+  if (workflowSummary.length < 10 || workflowSummary.length > 1000) {
+    return res.status(400).json({ error: 'workflowSummary must contain 10-1000 characters' });
+  }
+  try {
+    const evidence = await ai.callOpenRouterEvidence(
+      'You review AI observability operations only. Return JSON with exactly three concise controls for trace provenance, evaluation authorization, and human incident review. Do not invent telemetry.',
+      `Review this de-identified workflow: ${workflowSummary}`,
+    );
+    const saved = await pool.query(
+      `INSERT INTO ai_results(feature,input,output,tenant_id,user_id,provider_request_id,provider_model,result_text)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,created_at`,
+      [
+        'observability_readiness',
+        { workflowSummary },
+        evidence,
+        req.user.tenant_id,
+        req.user.id,
+        evidence.providerReceipt.requestId,
+        evidence.providerReceipt.model,
+        evidence.result,
+      ],
+    );
+    return res.json({ analysisId: saved.rows[0].id, createdAt: saved.rows[0].created_at, ...evidence });
+  } catch (error) {
+    console.error('[ai] observability readiness failed:', error.message);
+    return res.status(502).json({ error: 'AI provider request failed' });
+  }
+});
+
 const SCHEMAS = {
   'regression-detect': `{"verdict":"regression"|"neutral"|"improvement","overall_score_delta":number,"per_sample":[{"input":string,"baseline_score":number,"candidate_score":number,"diff_summary":string}],"failure_modes":[{"mode":string,"count":number,"examples":[string]}],"recommendation":string,"summary":string}`,
   'auto-rca': `{"failure_summary":string,"hypotheses":[{"rank":number,"hypothesis":string,"evidence_span":string,"confidence":number,"fix_proposal":string}],"primary_root_cause":string,"blast_radius":"low"|"medium"|"high","summary":string}`,

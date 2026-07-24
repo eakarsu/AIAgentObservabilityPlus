@@ -1,0 +1,6 @@
+{
+  "short_name": "Agent Observability Plus",
+  "name": "Agent Observability Plus",
+  "start_url": ".",
+  "display": "standalone"
+}
