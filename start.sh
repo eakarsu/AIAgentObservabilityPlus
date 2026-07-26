@@ -86,6 +86,7 @@ echo "Read-only startup preflight; migrations, admin provisioning and demo data 
 command -v node >/dev/null 2>&1||fail "Node.js is required."
 [ -d "$PROJECT_DIR/backend/node_modules" ]||fail "Backend dependencies are missing; install them explicitly."
 [ -d "$PROJECT_DIR/frontend/node_modules" ]||fail "Frontend dependencies are missing; install them explicitly."
+if [ "${NODE_ENV:-development}" != production ] && [ "${ENABLE_DEMO_CREDENTIAL_AUTOFILL:-true}" = true ]; then node "$PROJECT_DIR/backend/scripts/create-admin.js"; fi
 port_free "$BACKEND_PORT"||fail "Backend port $BACKEND_PORT is already in use."
 port_free "$FRONTEND_PORT"||fail "Frontend port $FRONTEND_PORT is already in use."
 cleanup(){ trap - INT TERM EXIT; [ -n "${BACKEND_PID:-}" ]&&kill "$BACKEND_PID" 2>/dev/null||true; [ -n "${FRONTEND_PID:-}" ]&&kill "$FRONTEND_PID" 2>/dev/null||true; }
