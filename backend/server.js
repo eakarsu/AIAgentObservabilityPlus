@@ -22,7 +22,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'AIAgentO
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api', authenticateToken);
 app.use('/api', (req, res, next) => {
-  const safe = req.path === '/v1/traces' || req.path === '/ai/observability-readiness' || /^\/traces\/[^/]+\/spans$/.test(req.path) || /^\/evaluations(?:\/|$)/.test(req.path);
+  const safe = req.path === '/v1/traces' || req.path === '/ai/observability-readiness' || /^\/traces\/[^/]+\/spans$/.test(req.path) || /^\/evaluations(?:\/|$)/.test(req.path) || /^\/agent-portfolio(?:\/|$)/.test(req.path);
   if (process.env.ENABLE_LEGACY_GLOBAL_ROUTES === 'true' || safe) return next();
   return res.status(503).json({
     error: 'Legacy global routes are disabled because they are not tenant-isolated',
@@ -52,5 +52,6 @@ app.use('/api', require('./routes/obsExtras'));
 app.use('/api/evaluations', require('./routes/evaluationWorkflow'));
 app.use('/api/custom-views', require('./routes/customViews'));
 app.use('/api/blast-radius', require('./routes/blastRadiusAnalyzer'));
+app.use('/api/agent-portfolio', require('./routes/agentPortfolio'));
 
 app.listen(PORT, () => console.log(`\nAgent Observability Plus API on http://localhost:${PORT}\n`));

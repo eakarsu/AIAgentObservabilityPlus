@@ -30,6 +30,7 @@ const CUSTOM_LINKS = [
 ];
 
 const OBS_LINKS = [
+  { to: '/agent-portfolio', label: 'Agent Portfolio Manager' },
   { to: '/custom-views', label: 'Custom Observability Views' },
   { to: '/blast-radius', label: 'Trace Blast Radius' },
   { to: '/production-controls', label: 'Production Controls' },

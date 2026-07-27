@@ -30,6 +30,7 @@ import CodexCustomVizFeature from './pages/CodexCustomVizFeature';
 import CodexOperationsFeature from './pages/CodexOperationsFeature';
 import BlastRadiusAnalyzerPage from './pages/BlastRadiusAnalyzerPage';
 import ProductionControlsPage from './pages/ProductionControlsPage';
+import AgentPortfolioPage from './pages/AgentPortfolioPage';
 
 function RequireAuth({ children }) {
   const location = useLocation();
@@ -70,6 +71,7 @@ function Shell() {
             <Route path="/custom-views" element={<CustomViewsPage />} />
             <Route path="/blast-radius" element={<BlastRadiusAnalyzerPage />} />
             <Route path="/production-controls" element={<ProductionControlsPage />} />
+            <Route path="/agent-portfolio" element={<AgentPortfolioPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
