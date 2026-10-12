@@ -12,7 +12,7 @@ export default function AIAutoRcaPage() {
         { key: 'trace_json', label: 'Failing Trace', type: 'textarea', placeholder: '' },
         { key: 'user_intent', label: 'User Intent', type: 'text', placeholder: '' }
       ]}
-      run={(v) => aiAutoRca(v)}
+      run={(v, requestOptions) => aiAutoRca(v, requestOptions)}
     />
   );
 }

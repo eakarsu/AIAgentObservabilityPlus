@@ -1,26 +1,3 @@
-import React from 'react';
-
-const controls = [
-  ['OTLP Connector Health', 'Trace, span, log, metric, webhook, and SDK ingestion freshness with retry queues.'],
-  ['Agent Identity & Access', 'SSO/MFA, project roles, API key ownership, service identities, and access certification.'],
-  ['Run Replay & Regression Gates', 'Trace replay, prompt snapshots, tool IO capture, eval gates, and release approval evidence.'],
-  ['Alert Delivery Ledger', 'Pager, Slack, email, webhook, retry, escalation, and acknowledgement history.'],
-  ['Audit Export Center', 'Trace, prompt, eval, API key, alert, and user-access exports for compliance review.'],
-  ['Production Observability Runbooks', 'Incident routing, blast-radius checks, on-call ownership, and postmortem closeout.'],
-];
-
-export default function ProductionControlsPage() {
-  return (
-    <div className="page">
-      <div className="page-header"><h1>Production Controls</h1><p>Go-live controls for agent observability, regression detection, and AI incident response.</p></div>
-      <div className="grid two">
-        {controls.map(([title, detail]) => (
-          <section className="card" key={title}>
-            <h2>{title}</h2>
-            <p className="muted">{detail}</p>
-          </section>
-        ))}
-      </div>
-    </div>
-  );
-}
+import React from'react';import EvaluationSourceWorkbench from'../components/EvaluationSourceWorkbench';import useOwnedStats from'../components/useOwnedStats';
+const controls=[['OTLP source import','Import and inspect actual caller-supplied traces. Unknown measurements remain unknown; source provenance is retained.','/wb/otlp-ingest'],['Trace source viewer','Inspect actual owned source spans and manage planning proposals. Source edits and execution require their genuine workflows.','/wb/trace-viewer'],['Credential planning','Manage private credential requirements. Saving a draft does not provision an API key, SSO or service identity.','/api-keys'],['Native advisory reports','Review supplied workflow context with OpenRouter. Suggestions do not authorize evaluation changes or operational actions.','/ai/observability-readiness'],['Alert review records','Manage owned planning and supplied evaluation reviews. Pager, Slack, email and delivery adapters need actual provisioning.','/alerts'],['Owned planning records','Review project/evaluation/alert proposals and actual saved counts. No go-live approval or production execution is inferred.','/codex/operations']];
+export default function ProductionControlsPage(){const{stats,loading,error,reload}=useOwnedStats();return <section><div className="page-header"><h1>Observability source and review controls</h1><p>Working local source, review and planning tools. External delivery, identity integrations, release approvals and production execution retain their actual prerequisites.</p></div>{loading&&<p role="status">Loading owned control record counts…</p>}{error&&<p role="alert">{error} <button onClick={reload}>Retry control counts</button></p>}{stats&&!error&&<p>Saved owned planning/source records are available. Their presence does not establish deployment, credentials, approval or delivery.</p>}<div className="grid two">{controls.map(([title,detail,href])=><article className="card" key={title}><h2>{title}</h2><p>{detail}</p><a className="btn secondary" href={href}>Open local tool</a></article>)}</div><EvaluationSourceWorkbench/></section>;}

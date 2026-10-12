@@ -13,7 +13,7 @@ export default function AIEvalGeneratorPage() {
         { key: 'objective', label: 'Objective', type: 'text', placeholder: '' },
         { key: 'sample_count', label: 'Samples', type: 'number', placeholder: '' }
       ]}
-      run={(v) => aiEvalGenerator(v)}
+      run={(v, requestOptions) => aiEvalGenerator(v, requestOptions)}
     />
   );
 }

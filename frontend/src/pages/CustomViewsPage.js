@@ -1,26 +1,2 @@
-import React from 'react';
-import TraceFlameGraph from '../components/TraceFlameGraph';
-import LatencyHeatmap from '../components/LatencyHeatmap';
-import IncidentReportPDF from '../components/IncidentReportPDF';
-import AlertRulesEditor from '../components/AlertRulesEditor';
-
-export default function CustomViewsPage() {
-  return (
-    <div data-testid="custom-views-page">
-      <div className="page-header">
-        <div>
-          <h2>Observability Views</h2>
-          <p>Trace flame graphs, latency heatmaps, incident PDFs, and alert rule management.</p>
-        </div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }}>
-        <TraceFlameGraph />
-        <LatencyHeatmap />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <IncidentReportPDF />
-          <AlertRulesEditor />
-        </div>
-      </div>
-    </div>
-  );
-}
+import React from'react';import TraceViewerWorkbench from'./TraceViewerWorkbench';import LatencyHeatmap from'../components/LatencyHeatmap';import IncidentReportPDF from'../components/IncidentReportPDF';import AlertsPage from'./AlertsPage';
+export default function CustomViewsPage(){return <section data-testid="custom-views-page"><div className="page-header"><h1>Owned observability views</h1><p>Native saved planning records and actual supplied sources. No simulated trees, fabricated latency, made-up incidents or active alert rules are returned.</p></div><LatencyHeatmap/><IncidentReportPDF/><section className="card"><h2>Alert rule planning</h2><p>Manage owned proposals and review records. Saving a rule proposal does not activate a notification channel or deliver an alert.</p><AlertsPage/></section><TraceViewerWorkbench/></section>;}

@@ -4,9 +4,9 @@ import { alertsApi } from '../services/api';
 
 const FIELDS = [
   { key: 'project_name', label: 'Project', type: 'text' },
-  { key: 'severity', label: 'Severity', type: 'select', options: ["low","medium","high","critical"] },
+  { key: 'severity', label: 'Severity', type: 'select', options: ["planning draft","low","medium","high","critical"] },
   { key: 'message', label: 'Message', type: 'textarea' },
-  { key: 'status', label: 'Status', type: 'select', options: ["firing","resolved","silenced"] },
+  { key: 'status', label: 'Status', type: 'select', options: ["planning draft","firing","resolved","silenced"] },
   { key: 'fired_at', label: 'Fired', type: 'datetime-local' }
 ];
 

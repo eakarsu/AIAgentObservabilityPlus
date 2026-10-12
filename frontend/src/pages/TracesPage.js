@@ -5,7 +5,7 @@ import { tracesApi } from '../services/api';
 const FIELDS = [
   { key: 'project_name', label: 'Project', type: 'text' },
   { key: 'span_count', label: 'Spans', type: 'number' },
-  { key: 'status', label: 'Status', type: 'select', options: ["ok","error","degraded"] },
+  { key: 'status', label: 'Status', type: 'select', options: ["planning draft","ok","error","degraded"] },
   { key: 'duration_ms', label: 'Duration (ms)', type: 'number' },
   { key: 'started_at', label: 'Started', type: 'datetime-local' }
 ];

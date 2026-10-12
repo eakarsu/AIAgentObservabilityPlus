@@ -1,34 +1,6 @@
-
-import React, { useState, useEffect } from 'react';
-const TOKEN_KEY = Object.keys(localStorage).find((k) => k.endsWith('_token')) || 'agent_obs_plus_token';
-const API_BASE = '/api';
-const SAMPLE = JSON.stringify({resourceSpans:[{resource:{attributes:[{key:'service.name',value:{stringValue:'support-bot'}}]},scopeSpans:[{spans:[{traceId:'abc...',spanId:'001',name:'llm.call',startTimeUnixNano:'1700000000000000000',endTimeUnixNano:'1700000001500000000'},{traceId:'abc...',spanId:'002',name:'tool.search',parentSpanId:'001',startTimeUnixNano:'1700000000200000000',endTimeUnixNano:'1700000000900000000'}]}]}]}, null, 2);
-export default function OtlpIngestWorkbench(){
-  const [body,setBody]=useState(SAMPLE);const [resp,setResp]=useState(null);const [busy,setBusy]=useState(false);const [count,setCount]=useState(0);
-  useEffect(()=>{ fetch(API_BASE+'/traces',{headers:{Authorization:'Bearer '+localStorage.getItem(TOKEN_KEY)}}).then(r=>r.json()).then(d=>setCount((d||[]).length)); },[busy]);
-  const ingest=async()=>{
-    setBusy(true);setResp(null);
-    try{
-      const r=await fetch(API_BASE+'/v1/traces',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+localStorage.getItem(TOKEN_KEY)},body});
-      const d=await r.json();setResp({status:r.status,body:d});
-    }catch(e){setResp({status:0,body:{error:e.message}});}
-    setBusy(false);
-  };
-  return (
-    <div>
-      <div className="page-header"><div><h2>OTLP Ingest</h2><p>POST a real OpenTelemetry-formatted span batch and persist it.</p></div></div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
-        <div className="card">
-          <h3 style={{margin:'0 0 8px',color:'#cbd5e1'}}>OTLP payload</h3>
-          <textarea value={body} onChange={e=>setBody(e.target.value)} style={{width:'100%',minHeight:300,fontFamily:'Menlo,monospace',fontSize:11,background:'#0b1424',color:'#cbd5e1',border:'1px solid #1e293b',borderRadius:6,padding:10}}/>
-          <button className="btn" disabled={busy} onClick={ingest} style={{marginTop:10}}>{busy?'Ingesting…':'POST /api/v1/traces'}</button>
-        </div>
-        <div className="card">
-          <h3 style={{margin:'0 0 8px',color:'#cbd5e1'}}>Result</h3>
-          <div style={{fontSize:13,color:'#94a3b8',marginBottom:8}}>Total traces in DB: <strong style={{color:'#a78bfa'}}>{count}</strong></div>
-          {resp&&<pre style={{background:'#0b1424',padding:10,borderRadius:6,fontSize:11,color:'#cbd5e1',overflow:'auto',maxHeight:300}}>HTTP {resp.status}\n{JSON.stringify(resp.body,null,2)}</pre>}
-        </div>
-      </div>
-    </div>
-  );
+import React,{useEffect,useRef,useState}from'react';import{getToken}from'../services/api';import useOwnedRecordList from'../components/useOwnedRecordList';
+export default function OtlpIngestWorkbench(){const[body,setBody]=useState(''),[result,setResult]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),pending=useRef(null),list=useOwnedRecordList('/traces');useEffect(()=>()=>{pending.current?.abort();pending.current=null;},[]);const cancel=()=>{pending.current?.abort();pending.current=null;setBusy(false);setNotice('Import cancelled. Retained source records are preserved.');};
+ const ingest=async()=>{if(pending.current)return;setError('');setNotice('');let input;try{input=JSON.parse(body);if(!Array.isArray(input?.resourceSpans))throw Error('Paste your actual OTLP resourceSpans source array.');}catch(failure){setError(failure.message);return;}const controller=new AbortController();pending.current=controller;setBusy(true);setResult(null);try{const response=await fetch('/api/v1/traces',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+getToken()},body:JSON.stringify(input),signal:controller.signal}),data=await response.json();if(!response.ok)throw Error(data.error||'Could not import the supplied OTLP source.');if(!Array.isArray(data.ingested)||data.sourceProvenance!=='user_supplied_otlp')throw Error('The import service returned an invalid retained-source receipt.');if(pending.current===controller&&!controller.signal.aborted){setResult(data);await list.load();}}catch(failure){if(pending.current===controller&&!controller.signal.aborted)setError(failure.message);}finally{if(pending.current===controller){pending.current=null;setBusy(false);}}};
+ const readFile=async event=>{const file=event.target.files?.[0];if(!file)return;if(file.size>5242880){setError('Choose an actual OTLP file under5MB.');return;}try{setBody(await file.text());setError('');}catch{setError('Could not read this source file. Choose it again.');}};
+ return <section><div className="page-header"><h1>OTLP source import</h1><p>Import your actual exported source. No invented demo traces, timestamps, token usage or source costs are inserted.</p></div><section className="card"><label>Actual OTLP source file<input type="file" accept=".json,application/json" disabled={busy} onChange={readFile}/></label><label htmlFor="otlp-source">Actual source payload<textarea id="otlp-source" value={body} onChange={event=>setBody(event.target.value)} disabled={busy} rows={14} placeholder="Paste an actual resourceSpans JSON export from your OpenTelemetry producer."/></label><p>Original source identifiers are required. Sensitive attributes are redacted. Missing observations remain unknown; import does not validate production readiness or authorize release.</p><button className="btn primary" onClick={ingest} disabled={busy||!body.trim()}>{busy?'Importing actual source…':'Import actual OTLP source'}</button> <button className="btn secondary" onClick={cancel}>Cancel</button>{error&&<p role="alert">{error} <button onClick={ingest} disabled={busy}>Retry source import</button></p>}{notice&&<p role="status">{notice}</p>}{result&&<article><h2>Retained source receipt</h2><p>{result.verification}</p><table><thead><tr><th>Original trace identifier</th><th>Saved record</th><th>Supplied spans</th><th>Outcome</th></tr></thead><tbody>{result.ingested.map(item=><tr key={item.external_trace_id}><td>{item.external_trace_id}</td><td>#{item.trace_id}</td><td>{item.spans_received??'Already retained'}</td><td>{item.duplicate?'Identical source already retained':'Source imported'}</td></tr>)}</tbody></table></article>}</section><section className="card"><h2>Owned records</h2>{list.loading&&<p role="status">Loading owned PostgreSQL traces…</p>}{list.error&&<p role="alert">{list.error} <button onClick={list.load}>Retry trace count</button></p>}{!list.loading&&!list.error&&<p>{list.rows.length} owned trace records · {list.rows.filter(row=>row.record_kind==='planning_draft').length} planning drafts · {list.rows.filter(row=>row.record_kind==='actual_source').length} supplied sources.</p>}</section></section>;
 }

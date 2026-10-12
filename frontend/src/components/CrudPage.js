@@ -1,5 +1,7 @@
+import RecordDialog from './RecordDialog';
+import { AIResultValue } from './AIResultView';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { canWrite } from '../services/api';
+import { canWrite,archiveAttachment,downloadAttachment } from '../services/api';
 
 /**
  * Generic CRUD page.
@@ -31,6 +33,9 @@ export default function CrudPage({ title, subtitle, api, fields, statusKey, allo
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [viewing, setViewing] = useState(null);
+  const listRequest = useRef(null);
+  const mutationRequest = useRef(null);
+  const [mutating, setMutating] = useState(false);
 
   // attachments panel state
   const [attachRow, setAttachRow] = useState(null);
@@ -44,42 +49,55 @@ export default function CrudPage({ title, subtitle, api, fields, statusKey, allo
   const [importBusy, setImportBusy] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const importFileInputRef = useRef(null);
+  const importRequest=useRef(null),attachmentRequest=useRef(null);const [selectedFile,setSelectedFile]=useState(null);
 
   const emptyDraft = () =>
     Object.fromEntries(fields.map((f) => [f.key, f.type === 'number' ? 0 : '']));
 
   const load = async () => {
+    listRequest.current?.abort();
+    const controller = new AbortController(); listRequest.current = controller;
     setLoading(true);
     setErr(null);
     try {
-      const data = await api.list();
-      setRows(Array.isArray(data) ? data : []);
+      const data = await api.list({ signal: controller.signal });
+      if (!Array.isArray(data)) throw new Error('The records service returned an invalid list.');
+      if (listRequest.current === controller && !controller.signal.aborted) setRows(data);
     } catch (e) {
-      setErr(e.message);
+      if (listRequest.current === controller && !controller.signal.aborted) setErr(e.message);
     } finally {
-      setLoading(false);
+      if (listRequest.current === controller && !controller.signal.aborted) { listRequest.current = null; setLoading(false); }
     }
   };
 
-  useEffect(() => { load(); }, []); // eslint-disable-line
+  useEffect(() => { load(); return () => { listRequest.current?.abort(); listRequest.current = null; mutationRequest.current?.abort(); mutationRequest.current = null;importRequest.current?.abort();importRequest.current=null;attachmentRequest.current?.abort();attachmentRequest.current=null; }; }, []); // eslint-disable-line
   useEffect(() => { setPage(1); }, [search]);
 
   const openCreate = () => { setDraft(emptyDraft()); setCreating(true); setEditing(null); };
   const openEdit = (row) => { setDraft({ ...row }); setEditing(row); setCreating(false); };
-  const closeModal = () => { setCreating(false); setEditing(null); setDraft({}); };
+  const cancelMutation = () => { mutationRequest.current?.abort(); mutationRequest.current = null; setMutating(false); };
+  const closeModal = () => { cancelMutation(); setCreating(false); setEditing(null); setDraft({}); };
 
   const handleSave = async () => {
+    if (mutationRequest.current) return;
+    const controller = new AbortController(); mutationRequest.current = controller; setMutating(true);
     try {
-      if (editing) await api.update(editing.id, draft);
-      else await api.create(draft);
+      if (editing) await api.update(editing.id, draft, { signal: controller.signal });
+      else await api.create(draft, { signal: controller.signal });
+      if (mutationRequest.current !== controller || controller.signal.aborted) return;
       closeModal();
       load();
-    } catch (e) { alert(e.message); }
+    } catch (e) { if (mutationRequest.current === controller && !controller.signal.aborted) alert(e.message); }
+    finally { if (mutationRequest.current === controller) { mutationRequest.current = null; setMutating(false); } }
   };
 
   const handleDelete = async (row) => {
+    if (mutationRequest.current) return;
     if (!window.confirm(`Delete ${row[fields[0].key] || row.id}?`)) return;
-    try { await api.remove(row.id); load(); } catch (e) { alert(e.message); }
+    const controller = new AbortController(); mutationRequest.current = controller; setMutating(true);
+    try { await api.remove(row.id, { signal: controller.signal }); if (mutationRequest.current === controller && !controller.signal.aborted) load(); }
+    catch (e) { if (mutationRequest.current === controller && !controller.signal.aborted) alert(e.message); }
+    finally { if (mutationRequest.current === controller) { mutationRequest.current = null; setMutating(false); } }
   };
 
   const setField = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
@@ -124,51 +142,12 @@ export default function CrudPage({ title, subtitle, api, fields, statusKey, allo
     URL.revokeObjectURL(url);
   };
 
-  const handleImportFile = async (file) => {
-    if (!file) return;
-    setImportBusy(true);
-    setImportResult(null);
-    try {
-      const text = await file.text();
-      const result = await api.bulkImport(text);
-      setImportResult(result);
-      load();
-    } catch (e) {
-      setImportResult({ error: e.message });
-    } finally {
-      setImportBusy(false);
-    }
-  };
-
-  const openAttachments = async (row) => {
-    setAttachRow(row);
-    setAttachLoading(true);
-    setAttachError(null);
-    setAttachList([]);
-    try {
-      const list = await api.listAttachments(row.id);
-      setAttachList(Array.isArray(list) ? list : []);
-    } catch (e) {
-      setAttachError(e.message);
-    } finally {
-      setAttachLoading(false);
-    }
-  };
-  const closeAttachments = () => { setAttachRow(null); setAttachList([]); setAttachError(null); };
-  const handleAttachFile = async (file) => {
-    if (!file || !attachRow) return;
-    setAttachLoading(true);
-    try {
-      await api.uploadAttachment(attachRow.id, file);
-      const list = await api.listAttachments(attachRow.id);
-      setAttachList(Array.isArray(list) ? list : []);
-    } catch (e) {
-      setAttachError(e.message);
-    } finally {
-      setAttachLoading(false);
-    }
-  };
-
+  const closeImport=()=>{importRequest.current?.abort();importRequest.current=null;setImportOpen(false);setImportBusy(false);};
+  const handleImportFile=async file=>{if(!file||importRequest.current)return;const controller=new AbortController();importRequest.current=controller;setImportBusy(true);setImportResult(null);try{const text=await file.text();if(controller.signal.aborted)return;const result=await api.bulkImport(text,{signal:controller.signal});if(importRequest.current!==controller||controller.signal.aborted)return;if(!Number.isInteger(result.imported)||!Array.isArray(result.ids))throw Error('The planning import returned an invalid saved-record receipt.');setImportResult(result);load();}catch(failure){if(importRequest.current===controller&&!controller.signal.aborted)setImportResult({error:failure.message});}finally{if(importRequest.current===controller){importRequest.current=null;setImportBusy(false);}}};
+  const openAttachments=async row=>{attachmentRequest.current?.abort();const controller=new AbortController();attachmentRequest.current=controller;setAttachRow(row);setAttachLoading(true);setAttachError(null);setAttachList([]);try{const list=await api.listAttachments(row.id,{signal:controller.signal});if(!Array.isArray(list))throw Error('The files service returned an invalid list.');if(attachmentRequest.current===controller&&!controller.signal.aborted)setAttachList(list);}catch(failure){if(attachmentRequest.current===controller&&!controller.signal.aborted)setAttachError(failure.message);}finally{if(attachmentRequest.current===controller){attachmentRequest.current=null;setAttachLoading(false);}}};
+  const closeAttachments=()=>{attachmentRequest.current?.abort();attachmentRequest.current=null;setAttachRow(null);setSelectedFile(null);setAttachList([]);setAttachError(null);setAttachLoading(false);};
+  const handleAttachFile=async file=>{if(!file||!attachRow||attachmentRequest.current)return;const controller=new AbortController();attachmentRequest.current=controller;setAttachLoading(true);setAttachError(null);try{const saved=await api.uploadAttachment(attachRow.id,file,{signal:controller.signal});if(!saved?.id)throw Error('The source upload did not return a saved attachment.');const list=await api.listAttachments(attachRow.id,{signal:controller.signal});if(!Array.isArray(list))throw Error('The files service returned an invalid list.');if(attachmentRequest.current===controller&&!controller.signal.aborted)setAttachList(list);}catch(failure){if(attachmentRequest.current===controller&&!controller.signal.aborted)setAttachError(failure.message);}finally{if(attachmentRequest.current===controller){attachmentRequest.current=null;setAttachLoading(false);}}};
+  const fileAction=async action=>{if(attachmentRequest.current)return;const controller=new AbortController();attachmentRequest.current=controller;setAttachLoading(true);setAttachError(null);try{if(action==='download')await downloadAttachment(selectedFile,{signal:controller.signal});else{if(!window.confirm('Archive this owned attachment from the list? Its original source is retained.'))return;await archiveAttachment(selectedFile.id,{signal:controller.signal});const list=await api.listAttachments(attachRow.id,{signal:controller.signal});if(!Array.isArray(list))throw Error('The files service returned an invalid list.');if(attachmentRequest.current===controller&&!controller.signal.aborted){setAttachList(list);setSelectedFile(null);}}}catch(failure){if(attachmentRequest.current===controller&&!controller.signal.aborted)setAttachError(failure.message);}finally{if(attachmentRequest.current===controller){attachmentRequest.current=null;setAttachLoading(false);}}};
   const renderCell = (row, f) => {
     const v = row[f.key];
     if (v == null) return <span style={{ color: '#64748b' }}>—</span>;
@@ -189,6 +168,7 @@ export default function CrudPage({ title, subtitle, api, fields, statusKey, allo
           {subtitle && <p>{subtitle}</p>}
         </div>
         <div className="page-header-actions">
+          {mutating && <button type="button" className="btn secondary" onClick={cancelMutation}>Cancel record request</button>}
           <button className="btn secondary" onClick={handleExportCsv} disabled={filteredRows.length === 0}>
             Export CSV
           </button>
@@ -221,11 +201,11 @@ export default function CrudPage({ title, subtitle, api, fields, statusKey, allo
         </div>
       </div>
 
-      {err && <div className="ai-error">Failed to load: {err}</div>}
+      {err && <div className="ai-error" role="alert">Failed to load: {err} <button type="button" className="btn secondary" onClick={load}>Retry loading records</button></div>}
 
       {loading ? (
         <div className="empty-state">Loading...</div>
-      ) : filteredRows.length === 0 ? (
+      ) : err ? null : filteredRows.length === 0 ? (
         <div className="empty-state">
           {rows.length === 0
             ? (writer ? 'No records yet. Click "+ New" to add one.' : 'No records yet.')
@@ -243,8 +223,8 @@ export default function CrudPage({ title, subtitle, api, fields, statusKey, allo
               </thead>
               <tbody>
                 {pagedRows.map((row) => (
-                  <tr key={row.id} style={{ cursor: "pointer" }} onClick={() => setViewing(row)}>
-                    {fields.map((f) => <td key={f.key}>{renderCell(row, f)}</td>)}
+                  <tr key={row.id} className="sr-clickable-row" tabIndex={0} onClick={() => setViewing(row)} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) { event.preventDefault(); setViewing(row); } }}>
+                    {fields.map((f, index) => <td key={f.key}>{renderCell(row, f)}{index === 0 && row.record_kind === 'planning_draft' && <small style={{ display: 'block', color: '#94a3b8' }}>Planning draft · no execution or measurement asserted</small>}</td>)}
                     <td style={{ textAlign: 'right' }} onClick={(event) => event.stopPropagation()}>
                       {allowAttachments && (
                         <button className="btn secondary" onClick={() => openAttachments(row)} style={{ marginRight: 6 }}>
@@ -273,32 +253,8 @@ export default function CrudPage({ title, subtitle, api, fields, statusKey, allo
           )}
         </>
       )}
-      {viewing && (
-        <div className="modal-overlay" onClick={() => setViewing(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{title} · Details</h3>
-              <button className="modal-close" onClick={() => setViewing(null)}>×</button>
-            </div>
-            <div className="modal-body">
-              <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-                {fields.map((f) => (
-                  <div key={f.key} style={{ borderBottom: "1px solid #1e293b", paddingBottom: 6 }}>
-                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", color: "#64748b" }}>{f.label}</div>
-                    <div style={{ marginTop: 2 }}>{renderCell(viewing, f)}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn danger" onClick={() => { const row = viewing; setViewing(null); handleDelete(row); }}>Delete</button>
-              <button className="btn" onClick={() => { const row = viewing; setViewing(null); openEdit(row); }}>Edit</button>
-              <button className="btn secondary" onClick={() => setViewing(null)}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
 
+      {viewing && <RecordDialog title={title + ' · Details'} onClose={() => setViewing(null)}>{viewing.record_kind === 'planning_draft' && <p>This is a planning draft. It does not establish an actual trace, evaluation, alert, deployed prompt or issued credential.</p>}<div className="form-grid">{fields.map((field) => <div className="form-group" key={field.key}><label>{field.label}</label><AIResultValue value={viewing[field.key]} /></div>)}</div><div className="sr-actions">{allowAttachments && <button type="button" className="btn secondary" onClick={() => { const row = viewing; setViewing(null); openAttachments(row); }}>Files</button>}{writer && <><button type="button" className="btn" onClick={() => { const row = viewing; setViewing(null); openEdit(row); }}>Edit</button><button type="button" className="btn danger" onClick={() => { const row = viewing; setViewing(null); handleDelete(row); }}>Delete</button></>}</div></RecordDialog>}
 
       {(creating || editing) && (
         <div className="modal-overlay" onClick={closeModal}>
@@ -313,14 +269,15 @@ export default function CrudPage({ title, subtitle, api, fields, statusKey, allo
                   <div key={f.key} className={`form-group ${f.type === 'textarea' ? 'full-width' : ''}`}>
                     <label>{f.label}</label>
                     {f.type === 'select' ? (
-                      <select value={draft[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)}>
+                      <select value={draft[f.key] ?? ''} disabled={mutating} onChange={(e) => setField(f.key, e.target.value)}>
                         <option value="">—</option>
                         {(f.options || []).map((o) => <option key={o} value={o}>{o}</option>)}
                       </select>
                     ) : f.type === 'textarea' ? (
-                      <textarea value={draft[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} />
+                      <textarea value={draft[f.key] ?? ''} disabled={mutating} onChange={(e) => setField(f.key, e.target.value)} />
                     ) : (
                       <input
+                        disabled={mutating}
                         type={f.type || 'text'}
                         value={f.type === 'datetime-local' && draft[f.key]
                           ? String(draft[f.key]).slice(0, 16)
@@ -336,18 +293,18 @@ export default function CrudPage({ title, subtitle, api, fields, statusKey, allo
             </div>
             <div className="modal-footer">
               <button className="btn secondary" onClick={closeModal}>Cancel</button>
-              <button className="btn" onClick={handleSave}>{editing ? 'Save Changes' : 'Create'}</button>
+              <button className="btn" disabled={mutating} onClick={handleSave}>{mutating ? 'Saving…' : editing ? 'Save Changes' : 'Create'}</button>
             </div>
           </div>
         </div>
       )}
 
       {importOpen && (
-        <div className="modal-overlay" onClick={() => setImportOpen(false)}>
+        <div className="modal-overlay" onClick={closeImport}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600 }}>
             <div className="modal-header">
               <h3>Import CSV → {title}</h3>
-              <button className="modal-close" onClick={() => setImportOpen(false)}>×</button>
+              <button className="modal-close" onClick={closeImport}>×</button>
             </div>
             <div className="modal-body">
               <p style={{ color: '#94a3b8', fontSize: 13, marginBottom: 12 }}>
@@ -361,20 +318,17 @@ export default function CrudPage({ title, subtitle, api, fields, statusKey, allo
                 onChange={(e) => handleImportFile(e.target.files?.[0])}
               />
               {importBusy && <div className="empty-state">Importing...</div>}
-              {importResult && (
-                <pre style={{ background: '#0b1424', padding: 12, marginTop: 10, borderRadius: 8, fontSize: 12 }}>
-                  {JSON.stringify(importResult, null, 2)}
-                </pre>
-              )}
+              {importResult&&(importResult.error?<p role="alert">{importResult.error}</p>:<article><h4>Planning import complete</h4><p>{importResult.imported} owned planning drafts saved.</p><p>{importResult.message}</p></article>)}
             </div>
             <div className="modal-footer">
-              <button className="btn secondary" onClick={() => setImportOpen(false)}>Close</button>
+              <button className="btn secondary" onClick={closeImport}>Cancel</button>
             </div>
           </div>
         </div>
       )}
 
-      {attachRow && (
+      {selectedFile&&<RecordDialog title="Owned attachment details" onClose={()=>{attachmentRequest.current?.abort();attachmentRequest.current=null;setAttachLoading(false);setSelectedFile(null);}}><p>User-supplied attachment. No independent evidence validation or approval is attested.</p><dl><dt>Original filename</dt><dd>{selectedFile.original_name}</dd><dt>Supplied media type</dt><dd>{selectedFile.mimetype}</dd><dt>Stored bytes</dt><dd>{selectedFile.size_bytes}</dd></dl><button disabled title="Retained source contents are preserved">Edit</button> <button disabled={!writer||attachLoading} onClick={()=>fileAction('archive')}>Delete</button> <button disabled={attachLoading} onClick={()=>fileAction('download')}>Download source</button>{attachError&&<p role="alert">{attachError}</p>}</RecordDialog>}
+      {attachRow && !selectedFile && (
         <div className="modal-overlay" onClick={closeAttachments}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 700 }}>
             <div className="modal-header">
@@ -392,11 +346,11 @@ export default function CrudPage({ title, subtitle, api, fields, statusKey, allo
                 </div>
               )}
               {attachLoading && <div className="empty-state">Loading...</div>}
-              {attachError && <div className="ai-error">{attachError}</div>}
-              {!attachLoading && attachList.length === 0 && (
+              {attachError && <div role="alert" className="ai-error">{attachError} <button onClick={()=>openAttachments(attachRow)}>Retry files</button></div>}
+              {!attachLoading && !attachError && attachList.length === 0 && (
                 <div className="empty-state">No files attached.</div>
               )}
-              {attachList.length > 0 && (
+              {!attachLoading && !attachError && attachList.length > 0 && (
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                   {attachList.map((a) => (
                     <li key={a.id} style={{
@@ -412,21 +366,14 @@ export default function CrudPage({ title, subtitle, api, fields, statusKey, allo
                           {a.mimetype} · {Math.round(a.size_bytes / 1024)} KB
                         </span>
                       </span>
-                      <a
-                        href={`/api/attachments/${a.id}/download`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="btn secondary"
-                      >
-                        Open
-                      </a>
+                      <button type="button" className="btn secondary" onClick={()=>setSelectedFile(a)}>Open details</button>
                     </li>
                   ))}
                 </ul>
               )}
             </div>
             <div className="modal-footer">
-              <button className="btn secondary" onClick={closeAttachments}>Close</button>
+              <button className="btn secondary" onClick={closeAttachments}>Cancel</button>
             </div>
           </div>
         </div>

@@ -82,11 +82,12 @@ export FRONTEND_PORT="${FRONTEND_PORT:-4054}"
 fail(){ echo "ERROR: $*" >&2; exit 1; }
 port_free(){ ! lsof -ti ":$1" >/dev/null 2>&1; }
 echo "Agent Observability Plus"
-echo "Read-only startup preflight; migrations, admin provisioning and demo data are separate commands."
+echo "Preparing additive database migrations. Existing records and accounts are preserved."
 command -v node >/dev/null 2>&1||fail "Node.js is required."
 [ -d "$PROJECT_DIR/backend/node_modules" ]||fail "Backend dependencies are missing; install them explicitly."
 [ -d "$PROJECT_DIR/frontend/node_modules" ]||fail "Frontend dependencies are missing; install them explicitly."
-if [ "${NODE_ENV:-development}" != production ] && [ "${ENABLE_DEMO_CREDENTIAL_AUTOFILL:-true}" = true ]; then node "$PROJECT_DIR/backend/scripts/create-admin.js"; fi
+node "$PROJECT_DIR/backend/scripts/migrate.js" || fail "Database migrations failed; existing data was preserved."
+if [ "${NODE_ENV:-development}" != production ] && [ "${ENABLE_DEMO_CREDENTIAL_AUTOFILL:-true}" = true ]; then node "$PROJECT_DIR/backend/scripts/create-admin.js" || fail "Configured Demo account check failed; existing account was preserved."; fi
 port_free "$BACKEND_PORT"||fail "Backend port $BACKEND_PORT is already in use."
 port_free "$FRONTEND_PORT"||fail "Frontend port $FRONTEND_PORT is already in use."
 cleanup(){ trap - INT TERM EXIT; [ -n "${BACKEND_PID:-}" ]&&kill "$BACKEND_PID" 2>/dev/null||true; [ -n "${FRONTEND_PID:-}" ]&&kill "$FRONTEND_PID" 2>/dev/null||true; }

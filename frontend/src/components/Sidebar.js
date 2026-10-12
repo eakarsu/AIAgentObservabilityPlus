@@ -14,6 +14,7 @@ const CRUD_LINKS = [
 ];
 
 const AI_LINKS = [
+  { to: "/ai/observability-readiness", label: "AI · Observability Readiness" },
   { to: '/ai/regression-detect', label: 'AI · Regression Detect' },
   { to: '/ai/auto-rca', label: 'AI · Auto RCA' },
   { to: '/ai/drift-score', label: 'AI · Drift Score' },
@@ -30,10 +31,12 @@ const CUSTOM_LINKS = [
 ];
 
 const OBS_LINKS = [
+  { to: '/codex/operations', label: 'Planning Desk' },
+  { to: '/codex/custom-viz', label: 'Owned Record Insights' },
   { to: '/agent-portfolio', label: 'Agent Portfolio Manager' },
   { to: '/custom-views', label: 'Custom Observability Views' },
-  { to: '/blast-radius', label: 'Trace Blast Radius' },
-  { to: '/production-controls', label: 'Production Controls' },
+  { to: '/blast-radius', label: 'AI · Blast Radius Review' },
+  { to: '/production-controls', label: 'Source & Review Controls' },
 ];
 
 export default function Sidebar() {

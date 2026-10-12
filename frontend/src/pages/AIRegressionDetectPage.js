@@ -13,7 +13,7 @@ export default function AIRegressionDetectPage() {
         { key: 'candidate_prompt', label: 'Candidate Prompt', type: 'textarea', placeholder: '' },
         { key: 'sample_inputs', label: 'Sample Inputs (newline)', type: 'textarea', placeholder: '' }
       ]}
-      run={(v) => aiRegressionDetect(v)}
+      run={(v, requestOptions) => aiRegressionDetect(v, requestOptions)}
     />
   );
 }

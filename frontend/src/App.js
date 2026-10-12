@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
+import ObservabilityReadinessPage from './pages/ObservabilityReadinessPage';
 import Topbar from './components/Topbar';
 import Dashboard from './pages/Dashboard';
 import LoginPage from './pages/LoginPage';
@@ -50,6 +51,7 @@ function Shell() {
         <Route path="/codex/operations" element={<CodexOperationsFeature />} />
 
             <Route path="/" element={<Dashboard />} />
+            <Route path="/ai/observability-readiness" element={<ObservabilityReadinessPage />} />
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/traces" element={<TracesPage />} />
             <Route path="/prompts" element={<PromptsPage />} />

@@ -1,117 +1,21 @@
-const router = require('express').Router();
-const pool = require('../config/database');
-const { requireCommander, requireTenant, requireWriter } = require('../middleware/auth');
-const { datasetHash, evaluationMetrics, redact } = require('../services/telemetryPolicy');
-
+const router=require('express').Router(),pool=require('../config/database'),{requireTenant}=require('../middleware/auth'),{datasetHash,evaluationMetrics,redact}=require('../services/telemetryPolicy');
 router.use(requireTenant);
-
-router.post('/runs', requireWriter, async (req, res) => {
-  const cases = Array.isArray(req.body?.cases) ? req.body.cases : [];
-  const threshold = Number(req.body?.threshold ?? 0.9);
-  const baseline = Number(req.body?.baseline_pass_rate);
-  if (!req.body?.dataset_name || !req.body?.dataset_version || !req.body?.project_name || !req.body?.candidate_version) {
-    return res.status(422).json({ error: 'dataset_name, dataset_version, project_name and candidate_version are required' });
-  }
-  if (!cases.length || cases.length > 10000 || !cases.every((item) => typeof item.passed === 'boolean')) {
-    return res.status(422).json({ error: 'cases must contain 1 to 10000 records with boolean passed' });
-  }
-  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
-    return res.status(422).json({ error: 'threshold must be between 0 and 1' });
-  }
-  const safeCases = redact(cases.map((item) => ({
-    case_ref: String(item.case_ref || ''), passed: item.passed,
-    score: Number(item.score || 0), latency_ms: Number(item.latency_ms || 0), details: item.details || {},
-  })));
-  const metrics = evaluationMetrics(safeCases, threshold, Number.isFinite(baseline) ? baseline : null);
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const dataset = (await client.query(
-      `INSERT INTO evaluation_datasets(tenant_id,name,version,content_hash,case_count,created_by)
-       VALUES($1,$2,$3,$4,$5,$6)
-       ON CONFLICT(tenant_id,name,version) DO UPDATE SET content_hash=EXCLUDED.content_hash,case_count=EXCLUDED.case_count
-       RETURNING *`,
-      [req.tenantId, String(req.body.dataset_name), String(req.body.dataset_version), datasetHash(safeCases), safeCases.length, req.user.id]
-    )).rows[0];
-    const run = (await client.query(
-      `INSERT INTO evaluation_runs(tenant_id,dataset_id,project_name,candidate_version,baseline_version,threshold,pass_rate,regression,gate_status,metrics,created_by)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [req.tenantId, dataset.id, String(req.body.project_name), String(req.body.candidate_version), req.body.baseline_version || null,
-        threshold, metrics.pass_rate, metrics.regression, metrics.gate_status, metrics, req.user.id]
-    )).rows[0];
-    for (const item of safeCases) {
-      await client.query(
-        `INSERT INTO evaluation_cases(run_id,case_ref,passed,score,latency_ms,details) VALUES($1,$2,$3,$4,$5,$6)`,
-        [run.id, item.case_ref, item.passed, item.score, item.latency_ms, item.details]
-      );
-    }
-    let incident = null;
-    if (metrics.gate_status === 'failed') {
-      incident = (await client.query(
-        `INSERT INTO incidents(tenant_id,project_name,source_type,source_id,severity,title,timeline)
-         VALUES($1,$2,'evaluation_run',$3,'high',$4,$5) RETURNING *`,
-        [req.tenantId, String(req.body.project_name), run.id, `Evaluation regression: ${req.body.candidate_version}`,
-          [{ at: new Date().toISOString(), actor_id: req.user.id, event: 'gate_failed', metrics }]]
-      )).rows[0];
-      await client.query(
-        `INSERT INTO alerts(tenant_id,project_name,severity,message,status,fired_at)
-         VALUES($1,$2,'high',$3,'firing',NOW())`,
-        [req.tenantId, String(req.body.project_name), `Evaluation gate failed for ${req.body.candidate_version}: pass rate ${metrics.pass_rate}`]
-      );
-    }
-    await client.query('COMMIT');
-    res.status(201).json({ run, metrics, incident });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Evaluation run failed:', error.message);
-    res.status(500).json({ error: 'Evaluation run could not be recorded' });
-  } finally { client.release(); }
-});
-
-router.get('/runs', async (req, res) => {
-  try { res.json((await pool.query('SELECT * FROM evaluation_runs WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 100', [req.tenantId])).rows); }
-  catch (error) { res.status(500).json({ error: 'Unable to list evaluation runs' }); }
-});
-router.get('/incidents', async (req, res) => {
-  try { res.json((await pool.query('SELECT * FROM incidents WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 100', [req.tenantId])).rows); }
-  catch (error) { res.status(500).json({ error: 'Unable to list incidents' }); }
-});
-router.post('/incidents/:id/status', requireCommander, async (req, res) => {
-  const status = String(req.body?.status || '');
-  if (!['open', 'investigating', 'mitigated', 'closed'].includes(status)) return res.status(422).json({ error: 'invalid incident status' });
-  try {
-    const event = { at: new Date().toISOString(), actor_id: req.user.id, event: 'status_changed', status, notes: String(req.body?.notes || '') };
-    const result = await pool.query(
-      `UPDATE incidents SET status=$1,timeline=timeline||$2::jsonb,updated_at=NOW() WHERE id=$3 AND tenant_id=$4 RETURNING *`,
-      [status, JSON.stringify([event]), req.params.id, req.tenantId]
-    );
-    if (!result.rowCount) return res.status(404).json({ error: 'Incident not found' });
-    res.json(result.rows[0]);
-  } catch (error) { res.status(500).json({ error: 'Unable to update incident' }); }
-});
-
-router.post('/retention/preview', requireCommander, async (req, res) => {
-  const days = Math.max(1, Math.min(3650, Number(req.body?.days || 30)));
-  try {
-    const traces = await pool.query(`SELECT COUNT(*)::int AS count FROM traces WHERE tenant_id=$1 AND created_at<NOW()-($2||' days')::interval`, [req.tenantId, String(days)]);
-    const spans = await pool.query(`SELECT COUNT(*)::int AS count FROM spans WHERE tenant_id=$1 AND created_at<NOW()-($2||' days')::interval`, [req.tenantId, String(days)]);
-    res.json({ days, traces: traces.rows[0].count, spans: spans.rows[0].count, applied: false });
-  } catch (error) { res.status(500).json({ error: 'Retention preview failed' }); }
-});
-router.post('/retention/apply', requireCommander, async (req, res) => {
-  const days = Math.max(1, Math.min(3650, Number(req.body?.days || 30)));
-  if (req.body?.confirm !== `DELETE_TRACES_OLDER_THAN_${days}_DAYS`) {
-    return res.status(422).json({ error: 'Exact confirmation token required', confirmation: `DELETE_TRACES_OLDER_THAN_${days}_DAYS` });
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const spans = await client.query(`DELETE FROM spans WHERE tenant_id=$1 AND created_at<NOW()-($2||' days')::interval`, [req.tenantId, String(days)]);
-    const traces = await client.query(`DELETE FROM traces WHERE tenant_id=$1 AND created_at<NOW()-($2||' days')::interval`, [req.tenantId, String(days)]);
-    await client.query('COMMIT');
-    res.json({ applied: true, days, deleted_spans: spans.rowCount, deleted_traces: traces.rowCount });
-  } catch (error) { await client.query('ROLLBACK'); res.status(500).json({ error: 'Retention application failed' }); }
-  finally { client.release(); }
-});
-
-module.exports = router;
+const invalid=message=>Object.assign(Error(message),{status:422});
+async function actor(req,db=pool,write=false,commander=false){const found=await db.query('SELECT role FROM users WHERE id=$1 AND tenant_id=$2'+(db!==pool?' FOR UPDATE':''),[req.user.id,req.tenantId]);if(found.rows[0]?.role!==req.user.role||write&&!['commander','analyst'].includes(found.rows[0]?.role)||commander&&found.rows[0]?.role!=='commander')throw Object.assign(Error('Your current account does not permit this evaluation action.'),{status:403});}
+router.use(async(req,res,next)=>{try{await actor(req);const controller=new AbortController(),abort=()=>{if(!res.writableEnded)controller.abort();};req.once('aborted',abort);res.once('close',abort);res.once('finish',()=>{req.off('aborted',abort);res.off('close',abort);});if(req.aborted||res.destroyed)controller.abort();req.evaluationSignal=controller.signal;next();}catch(error){res.status(error.status||503).json({error:error.status?error.message:'Could not verify the evaluation account.'});}});
+async function tx(req,work,commander=false){const db=await pool.connect();try{req.evaluationSignal.throwIfAborted();await db.query('BEGIN');await actor(req,db,true,commander);const result=await work(db);req.evaluationSignal.throwIfAborted();await db.query('COMMIT');return result;}catch(error){await db.query('ROLLBACK').catch(()=>{});throw error;}finally{db.release();}}
+const fail=(req,res,error)=>{if(!req.evaluationSignal.aborted&&!res.destroyed)res.status(error.status||500).json({error:error.status?error.message:'The owned evaluation request could not complete. No partial result was saved.'});};
+const optionalNumber=(value,name)=>{if(value===undefined||value===null||value==='')return null;if(!['number','string'].includes(typeof value)||typeof value==='string'&&!value.trim())throw invalid(name+' must be an actual supplied number.');return Number(value);};
+const label=(value,name,max)=>{if(typeof value!=='string'||!value.trim()||value.length>max)throw invalid(name+' is required within its supported field length.');return value.trim();};
+router.post('/runs',async(req,res)=>{try{await actor(req,pool,true);const body=req.body||{},cases=body.cases,datasetName=label(body.dataset_name,'Dataset name',160),datasetVersion=label(body.dataset_version,'Dataset version',80),project=label(body.project_name,'Project name',255),candidate=label(body.candidate_version,'Candidate version',160),threshold=body.threshold===undefined||body.threshold===null ? .9 : Number(body.threshold),baseline=optionalNumber(body.baseline_pass_rate,'Baseline pass rate');if(!Array.isArray(cases)||!cases.length||cases.length>10000||!cases.every(item=>typeof item.passed==='boolean'))throw invalid('Supply 1 to 10000 actual source cases with explicit boolean passed values.');if(!Number.isFinite(threshold)||threshold<0||threshold>1||baseline!==null&&(!Number.isFinite(baseline)||baseline<0||baseline>1))throw invalid('Threshold and any supplied baseline pass rate must be between 0 and 1.');
+const safeCases=redact(cases.map(item=>{const ref=label(item.case_ref,'Actual source case reference',160),score=optionalNumber(item.score,'Source score'),latency=optionalNumber(item.latency_ms,'Source latency');if(score!==null&&(!Number.isFinite(score)||score<0||score>1)||latency!==null&&(!Number.isFinite(latency)||latency<0||latency>999999999))throw invalid('Supplied source score or latency is invalid.');return{case_ref:ref,passed:item.passed,score,latency_ms:latency,details:item.details??{}};})),hash=datasetHash(safeCases),metrics=evaluationMetrics(safeCases,threshold,baseline);
+const result=await tx(req,async db=>{const prior=(await db.query('SELECT * FROM evaluation_datasets WHERE tenant_id=$1 AND name=$2 AND version=$3 FOR UPDATE',[req.tenantId,datasetName,datasetVersion])).rows[0];if(prior&&(Number(prior.created_by)!==Number(req.user.id)||prior.content_hash!==hash))throw Object.assign(Error('This source dataset/version already retains other contents or belongs to another actor. Originals were preserved.'),{status:409});const dataset=prior||(await db.query('INSERT INTO evaluation_datasets(tenant_id,name,version,content_hash,case_count,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[req.tenantId,datasetName,datasetVersion,hash,safeCases.length,req.user.id])).rows[0],run=(await db.query(`INSERT INTO evaluation_runs(tenant_id,dataset_id,project_name,candidate_version,baseline_version,threshold,pass_rate,regression,gate_status,metrics,created_by,source_provenance) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'user_supplied_evaluation') RETURNING *`,[req.tenantId,dataset.id,project,candidate,body.baseline_version||null,threshold,metrics.pass_rate,metrics.regression,metrics.gate_status,metrics,req.user.id])).rows[0];for(const item of safeCases)await db.query('INSERT INTO evaluation_cases(run_id,case_ref,passed,score,latency_ms,details) VALUES($1,$2,$3,$4,$5,$6)',[run.id,item.case_ref,item.passed,item.score,item.latency_ms,item.details]);let incident=null;
+if(metrics.gate_status==='failed'){incident=(await db.query(`INSERT INTO incidents(tenant_id,created_by,record_kind,project_name,source_type,source_id,severity,title,timeline) VALUES($1,$2,'evaluation_review',$3,'user_supplied_evaluation_review',$4,'high',$5,$6) RETURNING *`,[req.tenantId,req.user.id,project,run.id,'Review supplied evaluation: '+candidate,JSON.stringify([{at:new Date().toISOString(),actor_id:req.user.id,event:'supplied_threshold_review',metrics}])] )).rows[0];await db.query(`INSERT INTO alerts(tenant_id,created_by,record_kind,project_name,severity,message,status,fired_at) VALUES($1,$2,'evaluation_review',$3,'high',$4,'review required',NULL)`,[req.tenantId,req.user.id,project,'Unverified supplied evaluation needs review: '+candidate]);}return{run,metrics,incident};});res.status(201).json({...result,verification:'User-supplied evaluation data. Derived thresholds are advisory; no independent execution, actual operational incident, release approval or provider evaluation is attested.'});}catch(error){if(error.code==='23505')error=Object.assign(Error('This retained dataset/version already exists. Use a new actual source version.'),{status:409});fail(req,res,error);}});
+router.get('/runs',async(req,res)=>{try{res.json((await pool.query('SELECT * FROM evaluation_runs WHERE tenant_id=$1 AND created_by=$2 ORDER BY created_at DESC LIMIT 100',[req.tenantId,req.user.id])).rows);}catch(error){fail(req,res,error);}});
+router.get('/runs/:id',async(req,res)=>{try{if(!/^[1-9][0-9]*$/.test(req.params.id))throw invalid('Select an owned source run identifier.');const found=await pool.query('SELECT * FROM evaluation_runs WHERE id=$1 AND tenant_id=$2 AND created_by=$3',[req.params.id,req.tenantId,req.user.id]),run=found.rows[0];if(!run)return res.status(404).json({error:'Owned source run not found.'});const dataset=(await pool.query('SELECT * FROM evaluation_datasets WHERE id=$1 AND tenant_id=$2 AND created_by=$3',[run.dataset_id,req.tenantId,req.user.id])).rows[0];if(!dataset)return res.status(404).json({error:'Owned retained source dataset is unavailable.'});const cases=(await pool.query('SELECT case_ref,passed,score,latency_ms,details FROM evaluation_cases WHERE run_id=$1 ORDER BY id',[run.id])).rows;res.json({run,dataset,cases,retained:true});}catch(error){fail(req,res,error);}});
+router.get('/incidents',async(req,res)=>{try{res.json((await pool.query('SELECT * FROM incidents WHERE tenant_id=$1 AND created_by=$2 ORDER BY created_at DESC LIMIT 100',[req.tenantId,req.user.id])).rows);}catch(error){fail(req,res,error);}});
+router.post('/incidents/:id/status',async(req,res)=>{try{if(!/^[1-9][0-9]*$/.test(req.params.id)||!['open','investigating','mitigated','closed'].includes(req.body?.status))throw invalid('Supply an owned review identifier and a valid review status.');const result=await tx(req,db=>db.query('UPDATE incidents SET status=$1,timeline=timeline||$2::jsonb,updated_at=NOW() WHERE id=$3 AND tenant_id=$4 AND created_by=$5 RETURNING *',[req.body.status,JSON.stringify([{at:new Date().toISOString(),actor_id:req.user.id,event:'review_status_changed',status:req.body.status,notes:String(req.body.notes||'')}]),req.params.id,req.tenantId,req.user.id]),true);if(!result.rowCount)return res.status(404).json({error:'Owned evaluation review not found.'});res.json(result.rows[0]);}catch(error){fail(req,res,error);}});
+const days=req=>{const value=req.body?.days===undefined?30:Number(req.body.days);if(!Number.isInteger(value)||value<1||value>3650)throw invalid('Retention days must be an integer between 1 and 3650.');return value;};
+router.post('/retention/preview',async(req,res)=>{try{await actor(req,pool,false,true);const value=days(req),args=[req.tenantId,req.user.id,String(value)],traces=await pool.query("SELECT COUNT(*)::int AS count FROM traces WHERE tenant_id=$1 AND created_by=$2 AND created_at<NOW()-($3||' days')::interval",args),spans=await pool.query("SELECT COUNT(*)::int AS count FROM spans s JOIN traces t ON t.id=s.trace_id WHERE t.tenant_id=$1 AND t.created_by=$2 AND s.tenant_id=$1 AND t.created_at<NOW()-($3||' days')::interval",args);res.json({days:value,traces:traces.rows[0].count,spans:spans.rows[0].count,applied:false,scope:'actor-owned-records'});}catch(error){fail(req,res,error);}});
+router.post('/retention/apply',async(req,res)=>{try{const value=days(req);if(req.body?.confirm!==`DELETE_TRACES_OLDER_THAN_${value}_DAYS`)return res.status(422).json({error:'Exact confirmation token required',confirmation:`DELETE_TRACES_OLDER_THAN_${value}_DAYS`});const result=await tx(req,async db=>{const args=[req.tenantId,req.user.id,String(value)],spans=await db.query("DELETE FROM spans s USING traces t WHERE t.id=s.trace_id AND t.tenant_id=$1 AND t.created_by=$2 AND s.tenant_id=$1 AND t.created_at<NOW()-($3||' days')::interval",args),traces=await db.query("DELETE FROM traces WHERE tenant_id=$1 AND created_by=$2 AND created_at<NOW()-($3||' days')::interval",args);return{applied:true,days:value,deleted_spans:spans.rowCount,deleted_traces:traces.rowCount,scope:'actor-owned-records'};},true);res.json(result);}catch(error){fail(req,res,error);}});
+module.exports=router;

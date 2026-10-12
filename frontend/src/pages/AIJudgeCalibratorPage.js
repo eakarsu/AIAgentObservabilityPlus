@@ -12,7 +12,7 @@ export default function AIJudgeCalibratorPage() {
         { key: 'judge_prompt', label: 'Judge Prompt', type: 'textarea', placeholder: '' },
         { key: 'gold_labels', label: 'Gold Labels', type: 'textarea', placeholder: '' }
       ]}
-      run={(v) => aiJudgeCalibrator(v)}
+      run={(v, requestOptions) => aiJudgeCalibrator(v, requestOptions)}
     />
   );
 }

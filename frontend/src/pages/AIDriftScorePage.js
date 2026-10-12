@@ -12,7 +12,7 @@ export default function AIDriftScorePage() {
         { key: 'baseline_outputs', label: 'Baseline Outputs (last week)', type: 'textarea', placeholder: '' },
         { key: 'current_outputs', label: 'Current Outputs (today)', type: 'textarea', placeholder: '' }
       ]}
-      run={(v) => aiDriftScore(v)}
+      run={(v, requestOptions) => aiDriftScore(v, requestOptions)}
     />
   );
 }

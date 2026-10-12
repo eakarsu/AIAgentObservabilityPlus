@@ -1,5 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import AIResultDisplay from './AIResultDisplay';
+import AIFieldPresets, { completeExample } from './AIFieldPresets';
+import useCancelableAI from './useCancelableAI';
+import React, { useEffect, useRef, useState } from 'react';
+import AIResultDisplay from './AIResultView';
+import RecordDialog from './RecordDialog';
 import { getAIHistory, getAISamples } from '../services/api';
 
 /**
@@ -11,19 +14,23 @@ import { getAIHistory, getAISamples } from '../services/api';
  *   - run: async (values) => result
  *   - buttonLabel?
  */
-export default function AIPage({ title, subtitle, feature, inputs, run, buttonLabel = 'Run AI Analysis' }) {
+export default function AIPage({ title, subtitle, feature, inputs, run, buttonLabel = 'Generate with OpenRouter' }) {
   const initial = Object.fromEntries(
     (inputs || []).map((i) => [i.key, i.defaultValue ?? (i.type === 'number' ? 0 : '')])
   );
   const [values, setValues] = useState(initial);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
+  const aiRequest = useCancelableAI();
+  const { loading, result, error, setResult, setError } = aiRequest;
+
+
 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRows, setHistoryRows] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(null);
+  const [selectedHistory, setSelectedHistory] = useState(null);
+  const historyRequest = useRef(null);
+  useEffect(() => () => { historyRequest.current?.abort(); historyRequest.current = null; }, []);
 
   const [samples, setSamples] = useState([]);
 
@@ -42,59 +49,34 @@ export default function AIPage({ title, subtitle, feature, inputs, run, buttonLa
 
   const setField = (k, v) => setValues((s) => ({ ...s, [k]: v }));
 
-  const applySample = (sample) => {
-    const next = { ...initial };
-    const sv = sample && sample.values ? sample.values : {};
-    for (const k of Object.keys(sv)) next[k] = sv[k];
-    setValues(next);
-    setResult(null);
-    setError(null);
-  };
-  const fillAll = (style) => {
-    const next = { ...initial };
-    for (const i of (inputs || [])) {
-      const label = String(i.label || i.key).replace(/[_-]+/g, " ");
-      if (i.type === "number") next[i.key] = style === "detailed" ? 100 : style === "minimal" ? 1 : 10;
-      else if (i.type === "select") next[i.key] = (i.options && i.options[0]) || "Default";
-      else if (i.type === "textarea") next[i.key] = style === "detailed" ? `Detailed ${label}: describe the specifics, constraints and expected outcome for review.` : `Example ${label} for review.`;
-      else next[i.key] = style === "detailed" ? `${label} — detailed example value` : `${label} example`;
-    }
-    setValues(next);
-    setResult(null);
-    setError(null);
+  const applySample = (sample, index = 0) => {
+    setValues(completeExample(inputs, sample || {}, index, title, values));
+    setResult(null); setError(null);
   };
 
-
-  const handleRun = async () => {
-    setLoading(true); setError(null); setResult(null);
-    try {
-      const r = await run(values);
-      setResult(r);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const handleRun = async () => aiRequest.run((options) => run(values, options));
 
   const openHistory = async () => {
+    historyRequest.current?.abort();
+    const controller = new AbortController(); historyRequest.current = controller;
     setHistoryOpen(true);
     setHistoryLoading(true);
     setHistoryError(null);
     setHistoryRows([]);
     try {
-      const rows = await getAIHistory(feature, 50);
-      setHistoryRows(Array.isArray(rows) ? rows : []);
+      const rows = await getAIHistory(feature, 50, { signal: controller.signal });
+      if (!Array.isArray(rows)) throw new Error('The saved reports service returned an invalid list.');
+      if (historyRequest.current === controller && !controller.signal.aborted) setHistoryRows(rows);
     } catch (e) {
-      setHistoryError(e.message);
+      if (historyRequest.current === controller && !controller.signal.aborted) setHistoryError(e.message);
     } finally {
-      setHistoryLoading(false);
+      if (historyRequest.current === controller && !controller.signal.aborted) { historyRequest.current = null; setHistoryLoading(false); }
     }
   };
-  const closeHistory = () => setHistoryOpen(false);
+  const closeHistory = () => { historyRequest.current?.abort(); historyRequest.current = null; setHistoryOpen(false); };
 
   return (
-    <div>
+    <div className="sr-ai-workspace">
       <div className="page-header">
         <div>
           <h2>{title}</h2>
@@ -107,37 +89,12 @@ export default function AIPage({ title, subtitle, feature, inputs, run, buttonLa
           <button className="btn ai" onClick={handleRun} disabled={loading}>
             {loading ? <><span className="spinner" />Running...</> : buttonLabel}
           </button>
+          {loading && <button type="button" className="btn secondary btn-secondary" onClick={aiRequest.cancel}>Cancel</button>}
         </div>
       </div>
 
-      {samples && samples.length > 0 && inputs && inputs.length > 0 && (
-        <div className="card" style={{ marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-            <span style={{ fontWeight: 600, marginRight: 8 }}>Sample Fill:</span>
-            {samples.slice(0, 5).map((s, idx) => (
-              <button
-                key={idx}
-                type="button"
-                className="btn secondary"
-                title={s.label}
-                onClick={() => applySample(s)}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      {(inputs && inputs.length > 0) && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-          {["minimal", "standard", "detailed"].map((style) => (
-            <button key={style} type="button" className="btn secondary" onClick={() => fillAll(style)}>
-              Fill all fields ({style})
-            </button>
-          ))}
-        </div>
-      )}
-
+      <AIFieldPresets fields={inputs} samples={samples} context={title} disabled={loading} onFill={applySample} />
+      {aiRequest.notice && <div className="sr-notice" role="status">{aiRequest.notice}</div>}
 
       {(inputs && inputs.length > 0) && (
         <div className="card">
@@ -189,7 +146,7 @@ export default function AIPage({ title, subtitle, feature, inputs, run, buttonLa
             </div>
             <div className="modal-body">
               {historyLoading && <div className="empty-state">Loading history...</div>}
-              {historyError && <div className="ai-error">{historyError}</div>}
+              {historyError && <div className="ai-error" role="alert">{historyError} <button type="button" className="btn secondary" onClick={openHistory}>Retry saved reports</button></div>}
               {!historyLoading && !historyError && historyRows.length === 0 && (
                 <div className="empty-state">No past results for this feature yet.</div>
               )}
@@ -201,6 +158,7 @@ export default function AIPage({ title, subtitle, feature, inputs, run, buttonLa
                       {row.created_at ? new Date(row.created_at).toLocaleString() : ''}
                     </span>
                   </div>
+                  <button type="button" className="btn secondary" onClick={() => { closeHistory(); setSelectedHistory(row); }}>View report</button>
                   {row.input && Object.keys(row.input).length > 0 && (
                     <details>
                       <summary>Input parameters</summary>
@@ -216,11 +174,16 @@ export default function AIPage({ title, subtitle, feature, inputs, run, buttonLa
               ))}
             </div>
             <div className="modal-footer">
-              <button className="btn secondary" onClick={closeHistory}>Close</button>
+              <button className="btn secondary" onClick={closeHistory}>Cancel</button>
             </div>
           </div>
         </div>
       )}
+      {selectedHistory && <RecordDialog title={`${title} · Saved report`} onClose={() => setSelectedHistory(null)}>
+        <AIResultDisplay result={selectedHistory.output} feature={feature} title={title} model={selectedHistory.provider_model} />
+        <p>The original provider report is retained. Edit loads its saved inputs for a new generation.</p>
+        <div className="sr-actions"><button type="button" className="btn secondary" disabled={loading} onClick={() => { setValues(Object.fromEntries(inputs.map(input => [input.key, selectedHistory.input?.[input.key] ?? initial[input.key]]))); setSelectedHistory(null); setResult(null); setError(null); }}>Edit</button><button type="button" className="btn secondary" disabled title="Original provider evidence is retained.">Delete retained report</button></div>
+      </RecordDialog>}
     </div>
   );
 }

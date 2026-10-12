@@ -12,7 +12,7 @@ export default function AIAnomalyClassifyPage() {
         { key: 'metric_name', label: 'Metric Name', type: 'text', placeholder: '' },
         { key: 'recent_series', label: 'Recent Series (csv)', type: 'textarea', placeholder: '' }
       ]}
-      run={(v) => aiAnomalyClassify(v)}
+      run={(v, requestOptions) => aiAnomalyClassify(v, requestOptions)}
     />
   );
 }

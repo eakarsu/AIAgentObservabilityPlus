@@ -12,7 +12,7 @@ export default function AIPromptDiffPage() {
         { key: 'prompt_a', label: 'Prompt A', type: 'textarea', placeholder: '' },
         { key: 'prompt_b', label: 'Prompt B', type: 'textarea', placeholder: '' }
       ]}
-      run={(v) => aiPromptDiff(v)}
+      run={(v, requestOptions) => aiPromptDiff(v, requestOptions)}
     />
   );
 }

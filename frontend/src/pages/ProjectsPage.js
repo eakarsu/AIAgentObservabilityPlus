@@ -4,8 +4,8 @@ import { projectsApi } from '../services/api';
 
 const FIELDS = [
   { key: 'name', label: 'Name', type: 'text' },
-  { key: 'environment', label: 'Env', type: 'select', options: ["prod","staging","dev"] },
-  { key: 'status', label: 'Status', type: 'select', options: ["active","paused"] },
+  { key: 'environment', label: 'Env', type: 'select', options: ["planning draft","prod","staging","dev"] },
+  { key: 'status', label: 'Status', type: 'select', options: ["planning draft","active","paused"] },
   { key: 'notes', label: 'Notes', type: 'textarea' }
 ];
 

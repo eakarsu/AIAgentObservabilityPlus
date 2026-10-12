@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getDashboardStats } from '../services/api';
+import useOwnedStats from '../components/useOwnedStats';
 
 const FEATURES = [
   { path: '/projects', title: 'Projects', icon: 'P', color: '#3b82f6', desc: 'Manage projects.' },
@@ -23,9 +23,7 @@ const FEATURES = [
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [stats, setStats] = useState(null);
-  const [err, setErr] = useState(null);
-  useEffect(() => { getDashboardStats().then(setStats).catch((e) => setErr(e.message)); }, []);
+  const { stats, error: err, loading, reload } = useOwnedStats();
 
   return (
     <div>
@@ -33,8 +31,8 @@ export default function Dashboard() {
         <h2>Agent Observability Plus</h2>
         <p>Regression detection, auto-RCA, and drift alarms for production AI agents.</p>
       </div>
-      {err && <div className="ai-error">Stats unavailable: {err}</div>}
-      {stats && (
+      <p>Owned record counts include clearly labeled planning drafts.</p>{loading && <p role="status">Loading owned record counts…</p>}{err && <div role="alert" className="ai-error">Stats unavailable: {err} <button type="button" onClick={reload}>Retry loading records</button></div>}
+      {stats && !err && (
         <div className="stats-grid">
           <div className="stat"><div className="stat-label">Projects</div><div className="stat-value">{stats.projects?.total ?? '—'}</div></div>
           <div className="stat"><div className="stat-label">Traces</div><div className="stat-value">{stats.traces?.total ?? '—'}</div></div>

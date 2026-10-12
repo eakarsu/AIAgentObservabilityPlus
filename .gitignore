@@ -31,3 +31,5 @@ token.txt
 id_rsa*
 **/credentials*.json
 **/serviceAccount*.json
+
+backend/.data/

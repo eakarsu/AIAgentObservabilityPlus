@@ -14,7 +14,8 @@ const SYSTEM_BASE = 'You are a senior analyst supporting the Agent Observability
   '(4) Keep concise to fit token limit; never truncate. ' +
   '(5) First char must be `{`, last must be `}`.';
 
-async function callOpenRouterEvidence(systemPrompt, userPrompt) {
+async function callOpenRouterEvidence(systemPrompt, userPrompt, options = {}) {
+  options.signal?.throwIfAborted();
   const { baseUrl, key, model } = creds();
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
@@ -28,10 +29,13 @@ async function callOpenRouterEvidence(systemPrompt, userPrompt) {
       model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
       temperature: 0.4, max_tokens: 6000, response_format: { type: 'json_object' },
     }),
-    signal: AbortSignal.timeout(45_000),
+    signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(45_000)]) : AbortSignal.timeout(45_000),
   });
   const payload = await response.json().catch(() => null);
+  options.signal?.throwIfAborted();
   if (!response.ok) throw new Error(`OpenRouter request failed with status ${response.status}`);
+  const choice = payload?.choices?.[0];
+  if (choice?.message?.refusal || ['length', 'content_filter'].includes(choice?.finish_reason)) throw new Error('OpenRouter did not return a complete report. Generate again.');
   const requestId = typeof payload?.id === 'string' ? payload.id.trim() : '';
   const providerModel = typeof payload?.model === 'string' ? payload.model.trim() : '';
   const result = typeof payload?.choices?.[0]?.message?.content === 'string' ? payload.choices[0].message.content.trim() : '';

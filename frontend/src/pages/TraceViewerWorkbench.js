@@ -1,50 +1,6 @@
-
-import React, { useEffect, useState } from 'react';
-const TOKEN_KEY = Object.keys(localStorage).find((k) => k.endsWith('_token')) || 'agent_obs_plus_token';
-const API_BASE = '/api';
-export default function TraceViewerWorkbench(){
-  const [rows,setRows]=useState([]);const [open,setOpen]=useState(null);const [spans,setSpans]=useState([]);const [loading,setLoading]=useState(false);
-  useEffect(()=>{fetch(API_BASE+'/traces',{headers:{Authorization:'Bearer '+localStorage.getItem(TOKEN_KEY)}}).then(r=>r.json()).then(setRows);},[]);
-  const drill=async(id)=>{setOpen(id);setLoading(true);
-    const r=await fetch(API_BASE+'/traces/'+id+'/spans',{headers:{Authorization:'Bearer '+localStorage.getItem(TOKEN_KEY)}});
-    const d=await r.json();setSpans(Array.isArray(d)?d:[]);setLoading(false);};
-  return (
-    <div>
-      <div className="page-header"><div><h2>Trace Viewer</h2><p>Click a trace to see its real span hierarchy.</p></div></div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:16}}>
-        <div className="card">
-          <h3 style={{margin:'0 0 12px',color:'#cbd5e1'}}>Traces</h3>
-          {rows.map(r=>{
-            const tone=r.status==='error'?'#ef4444':r.status==='degraded'?'#f59e0b':'#10b981';
-            return (
-              <div key={r.id} onClick={()=>drill(r.id)} style={{padding:'10px',cursor:'pointer',background:open===r.id?'#1e293b':'transparent',borderRadius:6,marginBottom:4}}>
-                <div style={{display:'flex',justifyContent:'space-between'}}>
-                  <span>{r.project_name}</span><span style={{color:tone,fontSize:12}}>{r.status}</span>
-                </div>
-                <div style={{color:'#94a3b8',fontSize:11}}>{r.span_count} spans · {r.duration_ms}ms</div>
-              </div>
-            );
-          })}
-        </div>
-        <div className="card">
-          <h3 style={{margin:'0 0 12px',color:'#cbd5e1'}}>Spans</h3>
-          {!open&&<div className="empty-state">Pick a trace ←</div>}
-          {loading&&<div className="empty-state">Loading…</div>}
-          {!loading&&spans.map(s=>{
-            const w=Math.max(2,Math.min(100,Number(s.duration_ms||0)/Math.max(1,...spans.map(x=>Number(x.duration_ms||0)))*100));
-            const tone=s.status==='error'?'#ef4444':'#3b82f6';
-            return (
-              <div key={s.id} style={{padding:'6px 0',borderBottom:'1px solid #1e293b'}}>
-                <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:4}}>
-                  <span style={{paddingLeft:Number(s.depth||0)*14}}>{s.span_name}</span>
-                  <span style={{color:'#94a3b8'}}>{s.duration_ms}ms</span>
-                </div>
-                <div style={{height:6,background:'#1e293b',borderRadius:3}}><div style={{height:'100%',width:w+'%',background:tone,opacity:.7,borderRadius:3}}/></div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
+import React,{useEffect,useRef,useState}from'react';import TracesPage from'./TracesPage';import RecordDialog from'../components/RecordDialog';import useOwnedRecordList from'../components/useOwnedRecordList';import{getToken}from'../services/api';import{AIResultValue}from'../components/AIResultView';
+export default function TraceViewerWorkbench(){const list=useOwnedRecordList('/traces'),[open,setOpen]=useState(null),[spans,setSpans]=useState([]),[loading,setLoading]=useState(false),[error,setError]=useState(''),pending=useRef(null);const close=()=>{pending.current?.abort();pending.current=null;setOpen(null);setLoading(false);setError('');};useEffect(()=>()=>{pending.current?.abort();pending.current=null;},[]);
+ const drill=async trace=>{pending.current?.abort();const controller=new AbortController();pending.current=controller;setOpen(trace);setSpans([]);setLoading(true);setError('');try{const response=await fetch('/api/traces/'+trace.id+'/spans',{headers:{Authorization:'Bearer '+getToken()},signal:controller.signal}),body=await response.json();if(!response.ok)throw Error(body.error||'Could not load owned source spans.');if(!Array.isArray(body))throw Error('The span service returned an invalid list.');if(pending.current===controller&&!controller.signal.aborted)setSpans(body);}catch(failure){if(pending.current===controller&&!controller.signal.aborted)setError(failure.message);}finally{if(pending.current===controller&&!controller.signal.aborted)setLoading(false);}};
+ const max=Math.max(1,...spans.filter(span=>span.duration_ms!==null).map(span=>Number(span.duration_ms)||0)),depth=span=>{let count=0,parent=span.external_parent_span_id;const seen=new Set([span.external_span_id]);while(parent&&count<spans.length){if(seen.has(parent))break;seen.add(parent);const found=spans.find(item=>item.external_span_id===parent);if(!found)break;count++;parent=found.external_parent_span_id;}return count;};
+ return <section><div className="page-header"><h1>Trace source workbench</h1><p>Manage owned planning records below. Inspect spans only from your actual supplied OTLP sources.</p></div><section className="card"><h2>Retained source spans</h2><p>User-supplied telemetry does not attest independent validation, release approval or production execution.</p>{list.loading&&<p role="status">Loading owned trace sources…</p>}{list.error&&<p role="alert">{list.error} <button onClick={list.load}>Retry trace sources</button></p>}{!list.loading&&!list.error&&<><label htmlFor="source-trace">Owned source trace</label><select id="source-trace" value={open?.id||''} onChange={event=>{const trace=list.rows.find(row=>String(row.id)===event.target.value);if(trace?.record_kind==='actual_source')drill(trace);}}><option value="">Choose actual supplied trace…</option>{list.rows.map(row=><option key={row.id} value={row.id} disabled={row.record_kind!=='actual_source'}>{row.project_name||'Unnamed source'} · #{row.id} · {row.record_kind==='planning_draft'?'Planning draft: no actual spans':'User-supplied source'}</option>)}</select>{!list.rows.some(row=>row.record_kind==='actual_source')&&<p>No owned actual OTLP source has been imported. Planning drafts do not supply span evidence.</p>}</>}</section><TracesPage/>{open&&<RecordDialog title="Owned source trace spans" onClose={close}><p>Retained user-supplied source · {open.source_provenance||'Source provenance not provided'}</p><button disabled title="Retained sources require their actual authorized source workflow">Edit</button> <button disabled title="Retained sources are preserved">Delete</button>{loading&&<p role="status">Loading source spans…</p>}{error&&<p role="alert">{error} <button onClick={()=>drill(open)}>Retry source spans</button></p>}{!loading&&!error&&<><p>{spans.length} saved spans</p>{spans.map(span=><article key={span.id} className="card" style={{marginLeft:depth(span)*14}}><h3>{span.name||'Span name not provided'}</h3><p>{span.external_span_id} · {span.status} · Duration: {span.duration_ms===null?'Not measured':span.duration_ms+'ms'}</p>{span.duration_ms!==null&&<div role="img" aria-label={'Measured span duration '+span.duration_ms+'ms'} style={{height:8,width:Number(span.duration_ms)/max*100+'%',background:'#38bdf8'}}/>}<dl><dt>Input tokens</dt><dd>{span.input_tokens??'Not measured'}</dd><dt>Output tokens</dt><dd>{span.output_tokens??'Not measured'}</dd><dt>Source cost</dt><dd>{span.cost_usd??'Not measured'}</dd><dt>Source start</dt><dd>{span.started_at?new Date(span.started_at).toLocaleString():'Not provided'}</dd></dl><details><summary>Redacted source attributes</summary><AIResultValue value={span.attrs}/></details></article>)}</>}</RecordDialog>}</section>;
 }

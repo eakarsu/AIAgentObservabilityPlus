@@ -7,7 +7,7 @@ const FIELDS = [
   { key: 'key_prefix', label: 'Key Prefix', type: 'text' },
   { key: 'label', label: 'Label', type: 'text' },
   { key: 'last_used', label: 'Last Used', type: 'datetime-local' },
-  { key: 'status', label: 'Status', type: 'select', options: ["active","revoked"] }
+  { key: 'status', label: 'Status', type: 'select', options: ["planning draft","active","revoked"] }
 ];
 
 export default function ApiKeysPage() {
